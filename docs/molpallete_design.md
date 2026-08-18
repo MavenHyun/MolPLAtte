@@ -355,6 +355,36 @@ in the tail. That is exactly the regime MolDAM's headline number was reported
 from, and reporting Hit@100 = 0.798 at that point without the prior beside it
 would have been misleading. By epoch 25 it clears the prior at every cut-off.
 
+### Qualitative check — is it chemistry or is it memorisation?
+
+Hit@K says the right row comes back; it does not say the *wrong* rows are
+sensible. Querying the exported library with core templates from held-out
+molecules (top-5 shown, true R-group in bold where retrieved):
+
+```
+true  *OP(=O)(O)OP(=O)(O)OP(=O)(O)O          (triphosphate)
+top-5 *OP(=O)(O)O | *OP(=O)(O)OP(=O)(O)O | ***OP(=O)(O)OP(=O)(O)OP(=O)(O)O** | ...
+      -> mono-, di-, tri-phosphate in order: the homologous series
+
+true  *NCCCC                                  (n-butylamine)
+top-5 *NCCC | *NCCCCN | *NCCCN | *NCCN | *NCC
+      -> the alkylamine homologous series
+
+true  *C1O[C@H](C(=O)O)[C@@H](O)[C@H](O)[C@H]1O   (glucuronic acid)
+top-5 exact match at rank 1, then its stereoisomers
+
+true  *CCCCCCCCC                              (n-nonyl)
+top-5 *CCC | *CC | *COC | *C | *CCCC
+      -> right family, wrong chain length. An honest miss.
+```
+
+The failure mode is informative: the model has learned R-group *families* — it
+never answers a phosphate query with an alkylamine — but it does not resolve
+chain length within a family. That is what MolPLA claims qualitatively
+("rationally suggesting R-group replacements"), reproduced here on flavor
+chemistry, and it is what a lead-optimization user would actually want from a
+first pass.
+
 **Not comparable to MolPLA's published numbers** (MRR 0.2616, R@10 0.4839,
 R@100 0.8702 on GEOM): that library has 61,279 distinct R-groups against this
 one's 5,663, with a far less degenerate frequency distribution. A higher MRR here
