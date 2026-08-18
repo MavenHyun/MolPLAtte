@@ -12,6 +12,13 @@ WORKERS="${WORKERS:-88}"
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO"
 
+# Fail loudly if we are not where enumerate_rgroups.py lives. An earlier run of
+# this script was launched from a copy that had been written into the training
+# repo by mistake; it resolved $REPO there, could not find the driver, and the
+# only symptom was a silent "can't open file" buried in a nohup log.
+[ -f "$REPO/enumerate_rgroups.py" ] || {
+  echo "ERROR: enumerate_rgroups.py not found in $REPO -- wrong repo?" >&2; exit 1; }
+
 for corpus in "$CORPORA"/*/*/; do
   [ -f "$corpus/__meta__.json" ] || continue
   [ -f "$corpus/__manifest__.json" ] || { echo "== SKIP $corpus (still building)"; continue; }
