@@ -72,7 +72,7 @@ RDLogger.DisableLog("rdApp.*")
 torch.multiprocessing.set_sharing_strategy("file_system")
 
 from molpallete_prep import __version__
-from molpallete_prep.graph_hash import subgraph_hash
+from molpallete_prep.graph_hash import HASH_VERSION, subgraph_hash
 from molpallete_prep.graph_ops import detach_rgroups_multi
 from molpallete_prep.lmdb_store import dehydrate, hydrate
 from molpallete_prep.mol_features import pyg_to_mol
@@ -314,6 +314,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         "condvec_mode": corpus_meta.get("condvec_mode"),
         "condvec_dim": corpus_meta.get("condvec_dim"),
         "rdkit_version": corpus_meta.get("rdkit_version"),
+        "graph_hash_version": HASH_VERSION,
+        "corpus_graph_hash_version": corpus_meta.get("graph_hash_version"),
         "min_count": args.min_count,
         "drop_top_percentile": args.drop_top_percentile,
         "n_distinct_before_filter": n_before,

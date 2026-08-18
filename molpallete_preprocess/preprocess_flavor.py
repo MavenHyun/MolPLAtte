@@ -84,7 +84,7 @@ from molpallete_prep.decomposers import (
     get_fragment_decomposer,
     list_methods,
 )
-from molpallete_prep.graph_hash import subgraph_hash
+from molpallete_prep.graph_hash import HASH_VERSION, subgraph_hash
 from molpallete_prep.graph_ops import detach_rgroups_multi
 from molpallete_prep.mol_features import mol_to_pyg
 from molpallete_prep.molpla_instance import decomposition_record
@@ -505,6 +505,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         # cardinality can shift between releases, which would silently invalidate
         # this corpus's embedding indices. Record the version that built it.
         "rdkit_version": rdkit.__version__,
+        "graph_hash_version": HASH_VERSION,
         "sources": list(args.source),
         "source": args.source[0] if len(args.source) == 1 else "+".join(args.source),
         "dedup": dedup_enabled,

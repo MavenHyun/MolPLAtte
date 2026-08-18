@@ -62,6 +62,18 @@ class RGroupLibraryVocab:
         vocab = load_vocabulary(self.path)
         self.provenance = dict(vocab.provenance)
 
+        # The corpus's stored rgroup_hashes, this library's keys and the loss's
+        # multi-positive grouping must all come from the same hash definition.
+        # A mismatch degrades retrieval silently -- every query misses because
+        # its target key does not exist in the library -- so fail loudly.
+        vocab_hv = self.provenance.get("graph_hash_version")
+        corpus_hv = self.provenance.get("corpus_graph_hash_version")
+        if vocab_hv is not None and corpus_hv is not None and vocab_hv != corpus_hv:
+            raise ValueError(
+                f"graph hash version mismatch: vocabulary built with v{vocab_hv}, "
+                f"corpus with v{corpus_hv}. Rebuild whichever is stale."
+            )
+
         order = vocab.keys_by_frequency()
         if max_entries is not None:
             order = order[:max_entries]
