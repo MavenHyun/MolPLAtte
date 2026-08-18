@@ -1,0 +1,78 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "molpallete-prep"
+version = "0.1.0"
+description = "Corpus builder for MolPallete: FlavorDB / COCONUT -> anchored core + R-group records for MolPLA-style pretraining."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [
+  { name = "MolPallete contributors" },
+]
+keywords = [
+  "molpla",
+  "molecular-representation",
+  "pretraining",
+  "flavor-chemistry",
+  "natural-products",
+  "rdkit",
+  "torch-geometric",
+]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Operating System :: POSIX :: Linux",
+  "Topic :: Scientific/Engineering :: Chemistry",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+dependencies = [
+  # Upper bound is deliberate, not cargo-culted.  Five of the eleven feature
+  # tables in molpallete_prep/mol_features.py are built by enumerating an RDKit
+  # enum at import time:
+  #     chiral_tag   <- Chem.rdchem.ChiralType.names
+  #     hybridization<- Chem.rdchem.HybridizationType.names
+  #     bond_type    <- Chem.rdchem.BondType.names
+  #     bond_dir     <- Chem.rdchem.BondDir.names
+  #     bond_stereo  <- Chem.rdchem.BondStereo.names
+  # Feature values are stored as the *index into that list*, and MASK_VALUES
+  # reserves len(list) as the mask index.  If RDKit adds or reorders an enum
+  # member in a future release, every index shifts and the embedding tables of a
+  # model trained on an older corpus silently point at the wrong chemistry --
+  # no exception, no warning, just degraded training.  Pin the ceiling and bump
+  # it only after re-running the round-trip check in docs/corpus_format.md.
+  # Built and measured against rdkit 2026.03.2.
+  "rdkit>=2024.3.1,<2027",
+  "torch",
+  "torch-geometric",
+  "networkx",
+  "numpy",
+  "pandas",
+  "lmdb",
+  "zstandard",
+  # Required by --method macfrag: the vendored MacFrag implementation uses
+  # igraph for its block-merging step and raises ImportError without it.
+  "python-igraph>=0.10",
+  "tqdm",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7"]
+
+[tool.setuptools]
+packages = [
+  "molpallete_prep",
+  "molpallete_prep.decomposers",
+  "molpallete_prep.preprocess",
+  "molpallete_prep.vendor",
+  "molpallete_prep.vendor.synton",
+  "molpallete_prep.vendor.synton.src",
+]
+py-modules = ["preprocess_flavor"]
+
+[tool.setuptools.package-data]
+"molpallete_prep.vendor.synton" = ["config/*.xml"]

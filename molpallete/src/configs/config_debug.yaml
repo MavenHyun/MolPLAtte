@@ -1,0 +1,69 @@
+# @package _global_
+#
+# Debug config for MolPallete.
+# Small model, tiny batch, num_workers=0 (clean tracebacks + breakpoints),
+# limit_train_batches / limit_val_batches so each "epoch" is ~5 gradient steps.
+#
+# Launch:
+#     HYDRA_FULL_ERROR=1 python run.py --config-name config_debug
+#
+# For the fastest possible smoke (1 train + 1 val batch, no checkpoint/logger):
+#     HYDRA_FULL_ERROR=1 python run.py --config-name config_debug \
+#         trainer_kwargs.fast_dev_run=1
+#
+# For interactive breakpoints, prepend `python -m pdb` — because num_workers=0,
+# stack traces land in the main process and pdb works cleanly.
+
+defaults:
+  - config
+  - _self_
+
+experiment_name: debug_molpallete
+random_seed: 0
+debug_mode: false
+
+data_module_kwargs:
+  dataset_version:        flavor_v1
+  decomposition_method:   macfrag
+  batch_size:             8
+  num_workers:            0
+  persistent_workers:     false
+  pin_memory:             false
+  max_rgroups:            4
+
+nnet_module_kwargs:
+  hidden_dim:   64
+  dropout_rate: 0.0
+  num_conv:     2
+
+lightning_module_kwargs:
+  learning_rate: 1.0e-3
+  weight_decay:  0.0
+
+# The retrieval callbacks are gated on epoch >= 3 in main.get_callbacks and a
+# debug run never gets there, so FAISS is effectively off here. That is
+# intentional: a 5-step "corpus" produces meaningless r@k. Use smoke_test.sh
+# with more steps if you need to exercise the FAISS path itself.
+representation_health:
+  enabled: true
+  every_n_epochs: 1
+  enable_after_epoch: 0
+  n_graphs: 2
+  n_target_nodes: 1
+
+trainer_kwargs:
+  max_epochs:           2
+  accelerator:          gpu
+  devices:              1
+  precision:            32-true
+  num_sanity_val_steps: 1
+  limit_train_batches:  5
+  limit_val_batches:    2
+  log_every_n_steps:    1
+  enable_progress_bar:  true
+  deterministic:        true
+
+hydra:
+  run:
+    # relative to src/ (hydra runs with cwd=src) -> repo-root outputs/
+    dir: ../outputs/debug_molpallete

@@ -1,0 +1,50 @@
+# @package _global_
+
+# Forwarded verbatim to ``pytorch_lightning.Trainer(**trainer_kwargs)``.
+# ``default_root_dir`` is injected in code from ``master_path/checkpoints``.
+# ``logger`` / ``callbacks`` need instantiated objects and are wired in
+# ``main.get_trainer`` / ``main.get_callbacks``.
+
+trainer_kwargs:
+  # ----- training duration ---------------------------------------------------
+  max_epochs:                    100
+  min_epochs:                    null
+  max_steps:                     -1       # -1 = no step cap; obeys max_epochs
+  min_steps:                     null
+
+  # ----- hardware ------------------------------------------------------------
+  accelerator:                   auto     # 'auto' | 'cpu' | 'gpu' | 'mps' | 'tpu'
+  devices:                       auto     # int, list, or 'auto'
+  num_nodes:                     1
+  strategy:                      auto     # 'auto' | 'ddp' | 'ddp_spawn' | 'fsdp' | ...
+  precision:                     32-true  # '16-mixed' | 'bf16-mixed' | '32-true' | '64-true'
+  sync_batchnorm:                false
+
+  # ----- optimization --------------------------------------------------------
+  gradient_clip_val:             1.0
+  gradient_clip_algorithm:       norm     # 'norm' | 'value'
+  accumulate_grad_batches:       1        # >1 → larger effective batch size
+
+  # ----- validation cadence --------------------------------------------------
+  val_check_interval:            1.0      # float ≤1: fraction of epoch; int: steps
+  check_val_every_n_epoch:       1
+  num_sanity_val_steps:          2
+
+  # ----- logging / UX --------------------------------------------------------
+  log_every_n_steps:             50
+  enable_progress_bar:           true
+  enable_model_summary:          true
+  enable_checkpointing:          true
+
+  # ----- reproducibility / perf ---------------------------------------------
+  deterministic:                 false    # true for bit-exact reproducibility (slower)
+  benchmark:                     null     # null | true | false  (cudnn.benchmark)
+
+  # ----- debugging knobs (leave at defaults during real runs) ---------------
+  fast_dev_run:                  false    # true / int → tiny single-batch loop
+  overfit_batches:               0.0      # >0 → train on a few batches forever
+  limit_train_batches:           null     # int / float → cap batches per epoch
+  limit_val_batches:             null
+  limit_test_batches:            null
+  detect_anomaly:                false    # autograd anomaly detection (very slow)
+  profiler:                      null     # null | 'simple' | 'advanced' | 'pytorch'

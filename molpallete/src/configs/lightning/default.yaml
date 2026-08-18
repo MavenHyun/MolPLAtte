@@ -1,0 +1,14 @@
+# @package _global_
+
+lightning_module: MolPalleteLightningModule
+lightning_module_kwargs:
+  learning_rate:       1.0e-3
+  weight_decay:        0.0
+  # MolPLA's released settings.yaml coefficients. The paper (btae256, Eq. 14)
+  # reports all three at 1.0; the released code downweights the linker term to
+  # 0.1. We follow the code, because those are the weights the published
+  # numbers were actually produced with.
+  loss_weights:
+    graph_contrastive:   1.0
+    linker_contrastive:  0.1
+    rgroup_contrastive:  1.0

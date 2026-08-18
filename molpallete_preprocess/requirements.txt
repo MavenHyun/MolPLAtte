@@ -1,0 +1,33 @@
+# MolPallete preprocessing dependencies.
+# Measured against the `maven` conda env: Python 3.12.13, rdkit 2026.03.2,
+# torch 2.11.0+cu130, torch_geometric 2.7.0.
+
+# --- chemistry -------------------------------------------------------------
+# Upper bound is load-bearing.  Five of the eleven feature tables in
+# molpallete_prep/mol_features.py enumerate an RDKit enum (ChiralType,
+# HybridizationType, BondType, BondDir, BondStereo) and store the *index* into
+# that enumeration.  A release that adds or reorders an enum member shifts every
+# index and silently invalidates the embedding indices of an already-built
+# corpus.  See the comment in pyproject.toml before bumping.
+rdkit>=2024.3.1,<2027
+
+# --- graphs / tensors ------------------------------------------------------
+torch
+torch-geometric
+networkx
+numpy
+
+# --- source readers --------------------------------------------------------
+pandas
+
+# --- corpus storage --------------------------------------------------------
+lmdb
+zstandard
+
+# --- decomposers -----------------------------------------------------------
+# Required by --method macfrag; the vendored MacFrag uses igraph for block
+# merging and raises a helpful ImportError without it.
+python-igraph>=0.10
+
+# --- CLI -------------------------------------------------------------------
+tqdm

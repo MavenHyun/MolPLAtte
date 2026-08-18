@@ -1,0 +1,18 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Corpora and run outputs live outside the repo; never commit them.
+outputs/
+runs/
+checkpoints/
+*.pt
+*.mdb
+*.log
+wandb/
+.env
+
+.ipynb_checkpoints/
+.DS_Store

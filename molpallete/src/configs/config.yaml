@@ -1,0 +1,23 @@
+# MolPallete pretraining -- default composition.
+#
+# MolPLA's three contrastive objectives (graph / linker / R-group retrieval)
+# over the anchored G / P / R / Q views, on MolDAM's engineering. See
+# docs/molpallete_design.md for the notation contract; in particular the
+# paper's `Q` is this code's `P`, and this code's `Q` is `P u R`.
+
+defaults:
+  - api: default
+  - trainer: default
+  - lightning: default
+  - wandb: default
+  - data_module: default
+  - nnet_module: default
+  - loss_module: default
+  - _self_
+
+experiment_name: under_development
+random_seed: 911012
+master_path: /home/mogan/
+debug_mode: true
+run_mode: train
+checkpoint_mode: false

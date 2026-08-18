@@ -1,0 +1,34 @@
+# @package _global_
+
+# All three are the same symmetric in-batch InfoNCE on L2-normalised views
+# (MolPLA's `ContrastiveLoss(score_func='dualentropy')`, paper Eq. 13 "Dual
+# InfoNCE"): 0.5*CE(XY^T/tau, I) + 0.5*CE(YX^T/tau, I).
+#
+# Temperatures below are MolPLA's RELEASED settings.yaml values. The paper
+# reports 0.01 / 0.05 / 0.01 for graph / linker / rgroup respectively; the code
+# ships 0.1 for the graph term. Following the code, since that is what produced
+# the published numbers.
+
+loss_module: LossModuleMolPallete
+loss_module_kwargs:
+  # #1  pooled G <-> pooled Q          (paper tau 0.01, code 0.1)
+  loss_graph_kwargs:
+    temperature:             0.1
+  # #2  linker node emb in G <-> P_lj + R_lj   (paper 0.05, code 0.05)
+  loss_linker_kwargs:
+    temperature:             0.05
+  # #3  [P linker emb || condvec] <-> pooled R (paper 0.01, code 0.01)
+  loss_rgroup_kwargs:
+    temperature:             0.01
+    # Subtract log q(k) from the logits so the critic's optimum moves from PMI
+    # (log p(k|q) - log p(k)) to the posterior log p(k|q), which is what r@k
+    # rewards (Bengio & Senecal; Yi et al. 2019). Keeps inference as plain
+    # cosine ANN with no re-ranking. main.py derives FAISSRetrieval's
+    # popularity_correction from this flag so training and evaluation cannot
+    # disagree about what the similarity means.
+    logq_correction:         true
+    # A single R-group hash can appear several times within one batch. Treat
+    # every row sharing the target hash as a positive instead of scoring the
+    # duplicates as negatives -- otherwise the loss is actively penalised for
+    # being right.
+    multi_positive:          true

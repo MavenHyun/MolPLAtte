@@ -1,0 +1,228 @@
+"""MolPallete — MolPLA's masked graph contrastive learning on flavor chemistry.
+
+One encoder pass, three objectives
+----------------------------------
+``G``, ``P`` and every ``R`` arrive collated into a single graph batch ``W``.  The
+shared encoder runs **once** over ``W``; the three views are then recovered by
+boolean node masks.  This is MolPLA's central efficiency trait and the reason the
+framework trains three objectives for roughly the cost of one.
+
+Reading the outputs (paper equation numbers in brackets):
+
+``graph_contrastive`` [5-8]
+    ``z_G = g_theta(pool(H[G]))`` against ``z_Q = g_theta(pool(H[P u R]))``.
+    ``Q`` is the union of the query template and the detached R-groups, pooled as
+    one graph per instance.
+
+``linker_contrastive`` [9-10]
+    ``z_m = g_kappa(m_i)`` against ``z_p = g_kappa(q_i + r_i)``, where ``m_i`` is
+    the intact linker atom in ``G`` and ``q_i``/``r_i`` are its two masked
+    incarnations in ``P`` and ``R``, **summed vector-wise**.  The three are paired
+    by ``linker_id``, not by position.
+
+``rgroup_contrastive`` [11-12]
+    ``z_C = g_Phi(q_i (+) c_R)`` against ``z_R = g_phi(pool(H[R_i]))``.  This is the
+    R-group retrieval head that drives lead optimization, and it is **per-linker**:
+    one query per detached R-group, not one per molecule.  MolDAM replaced this
+    with a sum-pooled R-group bag contrasted against a single core, which collapses
+    cardinality; restoring the per-linker form is the point of MolPallete.
+
+Stop-gradients
+--------------
+``sg_P`` / ``sg_R`` / ``sg_Q`` detach the corresponding branch.  The paper applies
+``STOPGRAD`` to the **decomposed** branch of both losses 1 and 2 (Eqs. 8 and 10),
+i.e. BYOL-style asymmetry, which is the ``sg_Q=True`` default.  MolDAM dropped
+these toggles entirely and so has no collapse-mitigation lever.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field, fields
+from typing import Dict, Optional
+
+import torch
+from torch import nn
+from torch_geometric.nn import global_add_pool, global_mean_pool
+
+from . import encoders as encoder_registry
+from .heads import projectors as projector_registry
+
+__all__ = ["MolPalleteConfig", "MolPallete"]
+
+_POOLING = {"mean": global_mean_pool, "add": global_add_pool, "sum": global_add_pool}
+
+
+@dataclass
+class MolPalleteConfig:
+    """Hydra-facing model configuration.
+
+    ``__post_init__`` propagates the shared hyperparameters into each head's
+    kwargs wherever the YAML left them ``null``, which is how the config files
+    mark "inherit".
+    """
+
+    hidden_dim: int = 300
+    dropout_rate: float = 0.0
+    norm_method: str = "GraphNorm"
+    gnn_conv: str = "GINEConv"
+    num_conv: int = 5
+    graph_pooling: str = "mean"
+    condvec_dim: int = 97
+
+    stop_gradient_P: bool = False
+    stop_gradient_R: bool = False
+    stop_gradient_Q: bool = True
+
+    graph_encoder: str = "VanillaGNN"
+    graph_encoder_kwargs: dict = field(default_factory=dict)
+    graph_projector: str = "MLPProjector"
+    graph_projector_kwargs: dict = field(default_factory=dict)
+    node_projector: str = "MLPProjector"
+    node_projector_kwargs: dict = field(default_factory=dict)
+    query_projector: str = "MLPProjector"
+    query_projector_kwargs: dict = field(default_factory=dict)
+    rgroup_projector: str = "MLPProjector"
+    rgroup_projector_kwargs: dict = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        shared = {
+            "hidden_dim": self.hidden_dim,
+            "dropout_rate": self.dropout_rate,
+            "norm_method": self.norm_method,
+        }
+        for name in (
+            "graph_encoder_kwargs",
+            "graph_projector_kwargs",
+            "node_projector_kwargs",
+            "query_projector_kwargs",
+            "rgroup_projector_kwargs",
+        ):
+            head_kwargs = dict(getattr(self, name) or {})
+            for key, value in shared.items():
+                if head_kwargs.get(key) is None:
+                    head_kwargs[key] = value
+            setattr(self, name, head_kwargs)
+
+        self.graph_encoder_kwargs.setdefault("gnn_conv", self.gnn_conv)
+        self.graph_encoder_kwargs.setdefault("num_conv", self.num_conv)
+        # The query head alone sees the condition vector (paper Eq. 11).
+        if self.query_projector_kwargs.get("input_dim") is None:
+            self.query_projector_kwargs["input_dim"] = self.hidden_dim + self.condvec_dim
+        if self.graph_pooling not in _POOLING:
+            raise ValueError(
+                f"unknown graph_pooling {self.graph_pooling!r}; "
+                f"available: {sorted(_POOLING)}"
+            )
+
+
+class MolPallete(nn.Module):
+    """The composite model. ``forward`` mutates and returns the batch dict."""
+
+    def __init__(self, **kwargs) -> None:
+        super().__init__()
+        known = {f.name for f in fields(MolPalleteConfig)}
+        self.config = MolPalleteConfig(**{k: v for k, v in kwargs.items() if k in known})
+        c = self.config
+
+        self.nnet = nn.ModuleDict()
+        self.nnet["graph_encoder"] = getattr(encoder_registry, c.graph_encoder)(
+            **c.graph_encoder_kwargs
+        )
+        self.nnet["graph_projector"] = getattr(projector_registry, c.graph_projector)(
+            **c.graph_projector_kwargs
+        )
+        self.nnet["node_projector"] = getattr(projector_registry, c.node_projector)(
+            **c.node_projector_kwargs
+        )
+        self.nnet["query_projector"] = getattr(projector_registry, c.query_projector)(
+            **c.query_projector_kwargs
+        )
+        self.nnet["rgroup_projector"] = getattr(projector_registry, c.rgroup_projector)(
+            **c.rgroup_projector_kwargs
+        )
+        self.pool = _POOLING[c.graph_pooling]
+
+    @staticmethod
+    def _maybe_detach(tensor: torch.Tensor, flag: bool) -> torch.Tensor:
+        return tensor.detach() if flag else tensor
+
+    def forward(self, batch: Dict) -> Dict:
+        c = self.config
+
+        # --- one encoder pass over every view -------------------------------
+        W = self.nnet["graph_encoder"](batch["W"])
+        H = W.node_embeddings
+        batch["W"] = W
+
+        G_nodes = H[batch["G_markers"]]
+        P_nodes = self._maybe_detach(H[batch["P_markers"]], c.stop_gradient_P)
+        R_nodes = self._maybe_detach(H[batch["R_markers"]], c.stop_gradient_R)
+
+        node_sample = batch["node_sample"]
+        n_samples = int(batch["num_samples"])
+
+        # --- loss 1: graph-level G <-> Q ------------------------------------
+        # Q = P u R, pooled per instance. Concatenating the two node sets and
+        # their shared instance index pools the union in one call.
+        Q_nodes = torch.cat([P_nodes, R_nodes], dim=0)
+        Q_index = torch.cat(
+            [node_sample[batch["P_markers"]], node_sample[batch["R_markers"]]], dim=0
+        )
+        z_G = self.nnet["graph_projector"](
+            self.pool(G_nodes, node_sample[batch["G_markers"]], size=n_samples)
+        )
+        z_Q = self.nnet["graph_projector"](self.pool(Q_nodes, Q_index, size=n_samples))
+        z_Q = self._maybe_detach(z_Q, c.stop_gradient_Q)
+
+        # --- loss 2: linker-node G <-> (P + R) ------------------------------
+        # joint_* index into W, so gather from H directly rather than from the
+        # view slices -- no offset arithmetic, no ordering assumption.
+        joint_G_idx, joint_P_idx = batch["joint_G_idx"], batch["joint_P_idx"]
+        joint_R_idx = batch["joint_R_idx"]
+        m_i = H[joint_G_idx]
+        q_i = self._maybe_detach(H[joint_P_idx], c.stop_gradient_P)
+        r_i = self._maybe_detach(H[joint_R_idx], c.stop_gradient_R)
+
+        z_m = self.nnet["node_projector"](m_i)
+        z_p = self.nnet["node_projector"](q_i + r_i)
+        z_p = self._maybe_detach(z_p, c.stop_gradient_Q)
+
+        # --- loss 3: R-group retrieval, one query per detached R-group ------
+        n_rgroups = int(joint_R_idx.numel())
+        condvec = batch["condvec"].to(H.dtype)
+        # The retrieval callbacks build their dedup gallery assuming query and
+        # target rows are 1:1 and in the same order. A per-molecule aggregation
+        # slipping into either branch would misalign them silently and produce
+        # plausible-but-wrong R@K, so state the invariant here rather than trust it.
+        if condvec.shape[0] != n_rgroups:
+            raise ValueError(
+                f"condvec has {condvec.shape[0]} rows but the batch has "
+                f"{n_rgroups} detached R-groups"
+            )
+        if condvec.shape[-1] != c.condvec_dim:
+            raise ValueError(
+                f"condvec width {condvec.shape[-1]} != configured condvec_dim "
+                f"{c.condvec_dim}; the corpus and nnet_module config disagree"
+            )
+        query_input = torch.cat([q_i, condvec], dim=-1)
+        z_C = self.nnet["query_projector"](query_input)
+        rgroup_pooled = self.pool(
+            R_nodes, batch["R_pool_index"], size=max(n_rgroups, 1)
+        )[:n_rgroups]
+        z_R = self.nnet["rgroup_projector"](rgroup_pooled)
+
+        if z_C.shape[0] != z_R.shape[0]:
+            raise ValueError(
+                f"query/target row mismatch: {z_C.shape[0]} queries vs "
+                f"{z_R.shape[0]} R-group embeddings"
+            )
+
+        batch.update(
+            graph_contrastive=(z_G, z_Q),
+            linker_contrastive=(z_m, z_p),
+            rgroup_contrastive=(z_C, z_R),
+            # Exposed under stable names for the retrieval callbacks.
+            query_projection=z_C,
+            rgroup_projection=z_R,
+        )
+        return batch

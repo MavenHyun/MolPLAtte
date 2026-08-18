@@ -1,0 +1,38 @@
+# @package _global_
+
+# ``dataset_path: null`` is filled in by ``main.get_data_module`` as
+# ``{master_path}/preprocessed/molpallete``; DataModuleConfig.__post_init__
+# then appends ``{dataset_version}/{decomposition_method}``.
+
+data_module: MolPalleteDataModule
+data_module_kwargs:
+  dataset_path:           null
+  dataset_version:        flavor_v1
+  # macfrag, not naveja_recap. MolPLA's formulation needs k >= 2 R-groups for
+  # the `islinked` bitmask and the core-decoration objective to be
+  # non-degenerate, and naveja_recap with a ratio threshold cannot produce
+  # multi-R-group decompositions at any threshold -- 99.42% of instances have
+  # exactly one R-group at ratio=2/3, and even ratio=1/2 reaches only 0.83%.
+  # The cause is structural (RECAP children are single connected fragments),
+  # so it is not a tuning problem. macfrag measured 8.01 frags/mol at 4.67
+  # heavy atoms, the best multi-cut candidate. See docs/molpallete_design.md
+  # sec.3.1.
+  decomposition_method:   macfrag
+  batch_size:             512
+  num_workers:            8
+  val_split:              0.05
+  test_split:             0.05
+  seed:                   42
+  persistent_workers:     true
+  pin_memory:             true
+  prefetch_factor:        2
+  # Condition vector for MolPLA loss #3. `neutral` = ligand-only, 97 RDKit
+  # fragment/SMARTS presence bits (see molpallete_prep/condvec.py). `pocket`
+  # is a declared interface with a zero-filled implementation, which is
+  # deliberately the paper's `Cond. None` ablation -- an unfed pocket run
+  # shows up as collapsed retrieval rather than plausible noise.
+  condvec_mode:           neutral
+  condvec_dim:            97
+  # Cap on detached R-groups per instance, i.e. rows contributed to the
+  # per-linker retrieval loss.
+  max_rgroups:            8

@@ -1,0 +1,5 @@
+# @package _global_
+
+api:
+  wandb: ${oc.env:WANDB_API_KEY,null}
+  huggingface: ${oc.env:HF_TOKEN,null}

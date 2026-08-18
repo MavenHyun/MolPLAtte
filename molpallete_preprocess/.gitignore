@@ -1,0 +1,47 @@
+# Python build / cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg
+*.egg-info/
+build/
+dist/
+.eggs/
+
+# Pip / venv
+pip-log.txt
+pip-delete-this-directory.txt
+.venv/
+venv/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*~
+
+# Corpus outputs — one .pt per molecule, hundreds of thousands of files.
+# Never commit these; rebuild from the driver instead.
+*.pt
+flavordb_*/
+coconut_*/
+corpus_*/
+preprocessed/
+__meta__.json
+__meta__.worker_*.json
+__manifest__.json
+*.lmdb/
+*.mdb
+*.pkl.gz
+
+# Logs / run artefacts
+*.log
+logs/
+nohup.out
+
+# Local scratch
+scratch/
+tmp/

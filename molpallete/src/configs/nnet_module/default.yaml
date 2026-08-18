@@ -1,0 +1,53 @@
+# @package _global_
+
+# Sub-block fields left `null` are inherit markers: the model fans the
+# top-level `hidden_dim` / `dropout_rate` / `norm_method` down into any
+# component that did not override them.
+
+nnet_module: MolPallete
+nnet_module_kwargs:
+  hidden_dim:                300      # MolPLA's released width
+  dropout_rate:              0.0
+  norm_method:               GraphNorm
+  gnn_conv:                  GINEConv
+  num_conv:                  5
+  graph_pooling:             mean
+  condvec_dim:               97       # must match data_module_kwargs.condvec_dim
+
+  # SimSiam-style stop-gradient toggles (MolPLA settings.yaml sg_P/sg_R/sg_Q).
+  # All three losses are contrastive with no negative-free branch, so these are
+  # MolPLA's only collapse mitigation. MolDAM has no equivalent -- do not drop
+  # them.
+  stop_gradient_P:           false
+  stop_gradient_R:           false
+  stop_gradient_Q:           true
+
+  graph_encoder:             VanillaGNN
+  graph_encoder_kwargs:
+    hidden_dim:              null
+    dropout_rate:            null
+    norm_method:             null
+  # pooled G / Q  ->  loss #1 (graph_contrastive)
+  graph_projector:           MLPProjector
+  graph_projector_kwargs:
+    hidden_dim:              null
+    dropout_rate:            null
+    norm_method:             null
+  # linker node embeddings in G vs P_lj + R_lj  ->  loss #2 (linker_contrastive)
+  node_projector:            MLPProjector
+  node_projector_kwargs:
+    hidden_dim:              null
+    dropout_rate:            null
+    norm_method:             null
+  # [P linker node emb || condvec]  ->  loss #3 query side
+  query_projector:           MLPProjector
+  query_projector_kwargs:
+    hidden_dim:              null
+    dropout_rate:            null
+    norm_method:             null
+  # pooled R  ->  loss #3 target side
+  rgroup_projector:          MLPProjector
+  rgroup_projector_kwargs:
+    hidden_dim:              null
+    dropout_rate:            null
+    norm_method:             null
