@@ -233,8 +233,17 @@ The corpus-scale `naveja_recap` number (1.07 R-groups/decomposition over all
 23,216 records) confirms the 400-molecule probe. `synton` retained only 48.3% of
 molecules, matching its measured 50.2% no-partition rate.
 
-`coconut_v1/*` builds from 737,343 records collapsing to 489,395 distinct
-compounds after variant deduplication.
+COCONUT: 737,343 records collapsing to 489,395 distinct compounds after variant
+deduplication, 396,936 after the heavy-atom filter.
+
+| corpus | records | dec/mol | R-groups/dec | size |
+|---|---|---|---|---|
+| `coconut_v1/macfrag` | 354,515 | 7.56 | **3.13** | 4.1 GB |
+
+Natural products are larger and more decorated than flavor volatiles, so they give
+*more* multi-R-group structure than FlavorDB (3.13 vs 2.69 R-groups per
+decomposition) — which is the property MolPLA's objectives need. Build throughput
+was 2,620 mol/s on 88 workers; `no_decomp` was 10.7%.
 
 ### 5.4 Integration validation
 
@@ -284,7 +293,17 @@ number justifies it empirically rather than by analogy to MolDAM.
   If those disagree the correction is inconsistent between train and eval.
 - **`vocab.py` / `lmdb_store.py`** are carried over from MolDAM_prep but not yet
   wired into the driver; an R-group library builder is not yet written.
-- **No pretraining run at scale yet.** Only a single-batch overfit check.
+- **No pretraining run at scale yet.** The single-batch overfit check drives
+  val/loss 15.28 -> 7.79 and val R@10 0.378 -> 0.647 over 60 epochs, which
+  establishes that the objectives carry gradient signal but says nothing about
+  what the representation learns at corpus scale.
+- **`faiss-gpu-cu12` 1.14.1 has no Blackwell (sm_120) kernels** on this host, so
+  `FAISSRetrieval` defaults to `index_type="flat_cpu"`. Fine at the current
+  gallery size; revisit if the gallery reaches millions of rows.
+- **Corpora built before 2026-08-18 06:16 lack `rdkit_version`** in their
+  provenance block. The five completed at that point were backfilled atomically
+  from the same interpreter that built them; the field is written natively from
+  then on.
 
 ---
 

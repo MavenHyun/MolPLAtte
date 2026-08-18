@@ -127,8 +127,13 @@ python run.py --config-name config \
 | `flavor_v1/bemis_murcko` | 19,121 | 1.00 | 5.17 | 166 MB |
 | `flavor_v1/synton` | 12,084 | 2.52 | 1.12 | 111 MB |
 
+| `coconut_v1/macfrag` | 354,515 | 7.56 | 3.13 | 4.1 GB |
+
 `synton` retained 48.3% of molecules, matching its measured 50.2% no-partition
 rate on flavor chemistry (it is also ~30× slower than every other method).
+COCONUT's natural products are larger and more decorated than flavor volatiles,
+so they yield *more* multi-R-group structure than FlavorDB — which is exactly the
+property MolPLA's objectives need.
 
 ## Environment notes
 
