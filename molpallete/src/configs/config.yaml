@@ -33,3 +33,5 @@ rgroup_library:
   enable_after_epoch: 2      # retrieval over random embeddings is noise
   search_k:           1000   # MolPLA retrieves the top 1000
   encode_batch_size:  1024
+  max_queries:        20000  # exact search is n_queries x n_rows x dim; null = all.
+                             # Truncation is seeded and logged, never silent.

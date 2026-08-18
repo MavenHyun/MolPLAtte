@@ -71,6 +71,14 @@ class RGroupLibraryRetrieval(pl.Callback):
         Top-K retrieved per query; MolPLA uses 1000.
     encode_batch_size
         Graphs per forward pass when embedding the library.
+    max_queries
+        Cap on validation queries scored per epoch, subsampled with a fixed seed
+        so the estimate is comparable across epochs.  Exact search is
+        ``n_queries x n_rows x dim``: on COCONUT that is ~50K queries against a
+        ~100K-row library, which costs minutes per epoch on CPU and would dominate
+        validation.  ``None`` scores everything.  Whenever the cap bites it is
+        logged and surfaced as ``library/queries_truncated`` -- a silently
+        subsampled metric reads as a full-corpus number when it is not.
     """
 
     def __init__(
@@ -81,6 +89,7 @@ class RGroupLibraryRetrieval(pl.Callback):
         enable_after_epoch: int = 2,
         search_k: int = 1000,
         encode_batch_size: int = 1024,
+        max_queries: Optional[int] = 20000,
     ) -> None:
         super().__init__()
         self.vocab_path = vocab_path
@@ -89,6 +98,7 @@ class RGroupLibraryRetrieval(pl.Callback):
         self.enable_after_epoch = enable_after_epoch
         self.search_k = search_k
         self.encode_batch_size = encode_batch_size
+        self.max_queries = max_queries
 
         self._vocab = None
         self._disabled = False
@@ -211,6 +221,17 @@ class RGroupLibraryRetrieval(pl.Callback):
         queries = queries[in_library]
         target_rows = target_rows[in_library]
 
+        n_scorable = queries.shape[0]
+        truncated = 0
+        if self.max_queries is not None and n_scorable > self.max_queries:
+            # Fixed seed: the subsample must not wander between epochs or the
+            # trajectory would mix real learning with sampling noise.
+            rng = np.random.default_rng(0)
+            keep = rng.choice(n_scorable, size=self.max_queries, replace=False)
+            queries = queries[keep]
+            target_rows = target_rows[keep]
+            truncated = n_scorable - self.max_queries
+
         try:
             import faiss
 
@@ -235,6 +256,7 @@ class RGroupLibraryRetrieval(pl.Callback):
             f"{stage}/library/effective_size": self._vocab.effective_size(),
             f"{stage}/library/n_queries": float(queries.shape[0]),
             f"{stage}/library/n_target_missing": float(n_missing),
+            f"{stage}/library/queries_truncated": float(truncated),
         }
         summary = []
         for cut in _KS:
@@ -260,5 +282,12 @@ class RGroupLibraryRetrieval(pl.Callback):
             f"{queries.shape[0]:,}",
             mrr,
             "  ".join(summary),
-            f"  (skipped {n_missing:,} out-of-library targets)" if n_missing else "",
+            (
+                (f"  (skipped {n_missing:,} out-of-library targets)" if n_missing else "")
+                + (
+                    f"  (subsampled from {n_scorable:,} queries)"
+                    if truncated
+                    else ""
+                )
+            ),
         )
