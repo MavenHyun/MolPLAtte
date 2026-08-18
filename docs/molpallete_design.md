@@ -412,6 +412,39 @@ prior in the tail. The larger, less degenerate library is the likely reason: wit
 Queries are subsampled to 20,000 of ~30,000 per epoch with a fixed seed
 (`library/queries_truncated` records the rest).
 
+### Hash v1 vs v2 — what the fix was actually worth
+
+Identical settings, identical corpus content; the only difference is the WL hash
+(see §6). 30 epochs, `combined_*/macfrag`.
+
+| | library | MRR | Hit@1 | lift | Hit@10 | lift | Hit@100 | lift |
+|---|---|---|---|---|---|---|---|---|
+| v1 (old hash) | 60,773 | 0.8114 | 0.7409 | 2.80x | 0.9326 | 1.39x | 0.9866 | 1.22x |
+| **v2 (fixed)** | **48,671** | **0.8264** | **0.7534** | 2.82x | **0.9470** | 1.41x | **0.9924** | 1.22x |
+| delta | -19.9% | +0.0150 | +0.0125 | | +0.0144 | | +0.0058 | |
+
+**The fix was worth less than predicted.** I had said the split-row artefact meant
+the v1 numbers "understate the true figure". Directionally right -- every metric
+improves -- but by ~1.3 points of Hit@1, and the **lift is essentially unchanged**
+(2.80x -> 2.82x) because the frequency prior barely moved (0.2646 -> 0.2676).
+Merging duplicate rows removed mass from the numerator and denominator alike.
+
+Two things also confound the raw comparison and should keep it from being read as
+a clean win:
+
+1. The v2 library is **19.9% smaller**, which makes retrieval intrinsically
+   easier. Some of the +0.0125 is a smaller haystack, not better measurement.
+2. `val/loss` moved the *wrong* way (5.793 -> 5.930) and is **not comparable
+   across versions**: fewer distinct hashes means more in-batch multi-positive
+   collisions, so the per-row loss is averaged over more positives and the scale
+   shifts.
+
+The fix is still correct -- a vocabulary key must be isomorphism-invariant, and
+`chiral_tag`/`bond_dir` are not -- but its value is correctness of the artefact,
+not a materially better score. Convergence also differs: v2 starts *lower*
+(Hit@1 0.383 vs 0.535 at epoch 1) and overtakes by epoch 16, consistent with the
+changed multi-positive structure altering the early gradient signal.
+
 ### Measured cost of the all-zero condition vectors
 
 64.9% of condition vectors are all-zero (see §6). Splitting validation queries by
