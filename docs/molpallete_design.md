@@ -385,6 +385,50 @@ chain length within a family. That is what MolPLA claims qualitatively
 chemistry, and it is what a lead-optimization user would actually want from a
 first pass.
 
+### Combined corpus — the primary run
+
+`combined_v1/macfrag`: 369,881 molecules (351,382 COCONUT + 18,499 FlavorDB,
+5,062 duplicates removed), 332,893 train / 18,494 val / 18,494 test.
+5.4M parameters, 30 epochs, batch 512, bf16, one GPU. Library: **60,773 distinct
+R-groups**, effective size 34, top-1 share 31.08% — essentially the same scale as
+MolPLA's 61,279 on GEOM, so these numbers are comparable in a way the
+FlavorDB-only ones were not.
+
+| epoch | MRR | Hit@1 | Hit@10 | Hit@100 |
+|---|---|---|---|---|
+| 1 | 0.625 | 0.535 | 0.768 | 0.873 |
+| 8 | 0.778 | 0.698 | 0.912 | 0.979 |
+| 16 | 0.796 | 0.720 | 0.922 | 0.982 |
+| **30** | **0.811** | **0.741** | **0.933** | **0.987** |
+| *prior* | — | *0.265* | *0.671* | *0.809* |
+| **lift** | — | **2.80x** | **1.39x** | **1.22x** |
+
+val/loss 10.09 -> 5.79. Retrieval clears the frequency prior at every cut-off from
+epoch 1 onward — unlike the FlavorDB-only run, which needed ~25 epochs to beat the
+prior in the tail. The larger, less degenerate library is the likely reason: with
+60,773 rows at effective size 34 there is more genuine structure to learn than in
+5,663 rows at effective size 31.
+
+Queries are subsampled to 20,000 of ~30,000 per epoch with a fixed seed
+(`library/queries_truncated` records the rest).
+
+### Measured cost of the all-zero condition vectors
+
+64.9% of condition vectors are all-zero (see §6). Splitting validation queries by
+whether the target R-group is a pure alkyl chain — the case where the condition
+carries **no** information at all — quantifies what that costs:
+
+| query group | Hit@1 | Hit@10 |
+|---|---|---|
+| pure-alkyl R-groups (all-zero condition) | **0.398** | 0.958 |
+| all other R-groups | **0.692** | 0.934 |
+
+Hit@1 drops 42% relative, while Hit@10 is *higher*. The model finds the right
+R-group **family** reliably and fails on **size**: 37 of 191 top-1 errors are
+alkyl-to-wrong-length-alkyl (`*CCC`->`*CC`, `*CCCCCC`->`*CCCC`). That is exactly
+the signal the condition vector cannot express, and it is milder than predicted
+only because the core context partially substitutes for it.
+
 **Not comparable to MolPLA's published numbers** (MRR 0.2616, R@10 0.4839,
 R@100 0.8702 on GEOM): that library has 61,279 distinct R-groups against this
 one's 5,663, with a far less degenerate frequency distribution. A higher MRR here

@@ -156,7 +156,19 @@ the model has learned nothing the prior does not already give you.
 | Hit@10 | 0.005 | 0.675 | **0.847** | 0.650 | **1.30×** |
 | Hit@100 | 0.008 | 0.798 | **0.952** | 0.823 | **1.16×** |
 
-At epoch 7 the model beat the prior at Hit@1 but was *at or below* it at Hit@10
+On the **combined corpus** (369,881 molecules, a 60,773-R-group library at
+effective size 34 — the same scale as MolPLA's 61,279 on GEOM), 30 epochs:
+
+| metric | epoch 1 | epoch 30 | prior | lift |
+|---|---|---|---|---|
+| MRR | 0.625 | **0.811** | — | — |
+| Hit@1 | 0.535 | **0.741** | 0.265 | **2.80×** |
+| Hit@10 | 0.768 | **0.933** | 0.671 | **1.39×** |
+| Hit@100 | 0.873 | **0.987** | 0.809 | **1.22×** |
+
+It clears the prior at every cut-off from epoch 1, unlike the FlavorDB-only run.
+
+On FlavorDB alone, at epoch 7 the model beat the prior at Hit@1 but was *at or below* it at Hit@10
 and Hit@100 — top-of-list ranking learned, tail not yet. By epoch 25 it clears
 the prior everywhere. These are not comparable to MolPLA's published numbers
 (MRR 0.2616 on GEOM): that library has 61,279 distinct R-groups against this
@@ -171,6 +183,7 @@ one's 5,663, so a higher MRR here reflects an easier library, not a better model
 | `flavor_v1/bemis_murcko` | 19,121 | 1.00 | 5.17 | 166 MB |
 | `flavor_v1/synton` | 12,084 | 2.52 | 1.12 | 111 MB |
 
+| **`combined_v1/macfrag`** *(primary)* | **369,881** | **7.57** | **3.12** | 4.3 GB |
 | `coconut_v1/macfrag` | 354,515 | 7.56 | 3.13 | 4.1 GB |
 
 `synton` retained 48.3% of molecules, matching its measured 50.2% no-partition
