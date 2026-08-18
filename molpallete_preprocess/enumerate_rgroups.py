@@ -47,16 +47,34 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, Iterator, List, Optional, Tuple
 
+import pickle
+import zlib
+
 import numpy as np
 import torch
+import torch.multiprocessing
 from rdkit import Chem, RDLogger
 
 RDLogger.DisableLog("rdApp.*")
 
+# Two independent guards against the same failure, both learned the hard way:
+# a 370K-record run died at 150K with "RuntimeError: received 0 items of ancdata".
+#
+# Workers return thousands of R-group graphs each. Under torch's default
+# "file_descriptor" sharing strategy every tensor crossing the process boundary
+# consumes an fd, and 88 workers exhaust the limit partway through a large corpus
+# -- so the failure only appears at scale, after the small corpora have all
+# succeeded.
+#
+#  (1) switch the sharing strategy to file_system;
+#  (2) more decisively, keep torch tensors off the IPC path entirely by
+#      dehydrating to numpy and pickling+compressing in the worker.
+torch.multiprocessing.set_sharing_strategy("file_system")
+
 from molpallete_prep import __version__
 from molpallete_prep.graph_hash import subgraph_hash
 from molpallete_prep.graph_ops import detach_rgroups_multi
-from molpallete_prep.lmdb_store import hydrate
+from molpallete_prep.lmdb_store import dehydrate, hydrate
 from molpallete_prep.mol_features import pyg_to_mol
 from molpallete_prep.preprocess import atomic_write_json, path_for
 from molpallete_prep.rgroup_library import (
@@ -135,13 +153,48 @@ def _scan_one(mol_id: str) -> Optional[RGroupVocabulary]:
     return vocab
 
 
-def _scan_batch(mol_ids: List[str]) -> RGroupVocabulary:
+def _scan_batch(mol_ids: List[str]) -> bytes:
+    """Scan a batch and return it **as compressed bytes**, not as objects.
+
+    Returning the ``RGroupVocabulary`` directly would send torch tensors through
+    the multiprocessing pipe; see the sharing-strategy note at the top of this
+    module for why that fails at corpus scale.
+    """
     merged = RGroupVocabulary()
     for mol_id in mol_ids:
         partial = _scan_one(mol_id)
         if partial is not None:
             merged.merge(partial)
-    return merged
+    payload = {
+        key: {
+            "graph": dehydrate(entry.graph),
+            "smiles": entry.smiles,
+            "count": entry.count,
+            "condvec": entry.condvec,
+            "n_atoms": entry.n_atoms,
+        }
+        for key, entry in merged.entries.items()
+    }
+    return zlib.compress(pickle.dumps(payload, protocol=pickle.HIGHEST_PROTOCOL), 1)
+
+
+def _merge_payload(vocab: RGroupVocabulary, blob: bytes) -> None:
+    """Fold a worker's compressed return into the accumulating vocabulary."""
+    for key, raw in pickle.loads(zlib.decompress(blob)).items():
+        existing = vocab.entries.get(key)
+        if existing is None:
+            vocab.add(
+                key,
+                graph=hydrate(raw["graph"]),
+                smiles=raw["smiles"],
+                condvec=raw["condvec"],
+                n_atoms=raw["n_atoms"],
+                count=raw["count"],
+            )
+        else:
+            existing.count += raw["count"]
+            if not existing.smiles and raw["smiles"]:
+                existing.smiles = raw["smiles"]
 
 
 def _chunked(items: List[str], size: int) -> Iterator[List[str]]:
@@ -215,10 +268,10 @@ def main(argv: Optional[List[str]] = None) -> int:
         initializer=_init_worker,
         initargs=({"corpus": str(corpus), "layout": layout},),
     ) as pool:
-        for partial in pool.imap_unordered(
+        for blob in pool.imap_unordered(
             _scan_batch, _chunked(ids, args.batch_size), chunksize=1
         ):
-            vocab.merge(partial)
+            _merge_payload(vocab, blob)
             processed += args.batch_size
             if processed - last_report >= args.progress_every:
                 elapsed = time.time() - started
