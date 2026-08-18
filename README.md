@@ -147,6 +147,21 @@ model, `hit@1000 = 0.098` against a prior of `0.947`: a number that looks
 non-trivial in isolation and is in fact far below the baseline. `lift <= 1` means
 the model has learned nothing the prior does not already give you.
 
+25 epochs of pretraining on `flavor_v1/macfrag`, scored over all 5,663 R-groups:
+
+| metric | untrained | epoch 7 | epoch 25 | prior | lift |
+|---|---|---|---|---|---|
+| MRR | 0.0016 | 0.497 | **0.723** | — | — |
+| Hit@1 | 0.000 | 0.374 | **0.645** | 0.140 | **4.6×** |
+| Hit@10 | 0.005 | 0.675 | **0.847** | 0.650 | **1.30×** |
+| Hit@100 | 0.008 | 0.798 | **0.952** | 0.823 | **1.16×** |
+
+At epoch 7 the model beat the prior at Hit@1 but was *at or below* it at Hit@10
+and Hit@100 — top-of-list ranking learned, tail not yet. By epoch 25 it clears
+the prior everywhere. These are not comparable to MolPLA's published numbers
+(MRR 0.2616 on GEOM): that library has 61,279 distinct R-groups against this
+one's 5,663, so a higher MRR here reflects an easier library, not a better model.
+
 ## Corpora built
 
 | corpus | records | dec/mol | R-groups/dec | size |

@@ -336,6 +336,30 @@ Both retrieval evaluations are logged, under distinct prefixes so they cannot be
 confused: `{stage}/faiss/*` is the cheap val-split gallery, `{stage}/library/*`
 is the full corpus library.
 
+### Does it learn? — 25 epochs on `flavor_v1/macfrag`
+
+Full-library retrieval over all 5,663 R-groups, ~1,450 validation queries per
+epoch, batch 512, bf16, one GPU:
+
+| metric | untrained | epoch 7 | **epoch 25** | prior | **lift** |
+|---|---|---|---|---|---|
+| MRR | 0.0016 | 0.497 | **0.723** | — | — |
+| Hit@1 | 0.000 | 0.374 | **0.645** | 0.140 | **4.6x** |
+| Hit@10 | 0.005 | 0.675 | **0.847** | 0.650 | **1.30x** |
+| Hit@100 | 0.008 | 0.798 | **0.952** | 0.823 | **1.16x** |
+
+The trajectory is the informative part. At epoch 7 the model beat the prior at
+Hit@1 (2.5x) but sat *at or below* it at Hit@10 (1.04x) and Hit@100 (0.97x) — it
+had learned to rank the top of the list without beating "return the most common"
+in the tail. That is exactly the regime MolDAM's headline number was reported
+from, and reporting Hit@100 = 0.798 at that point without the prior beside it
+would have been misleading. By epoch 25 it clears the prior at every cut-off.
+
+**Not comparable to MolPLA's published numbers** (MRR 0.2616, R@10 0.4839,
+R@100 0.8702 on GEOM): that library has 61,279 distinct R-groups against this
+one's 5,663, with a far less degenerate frequency distribution. A higher MRR here
+reflects an easier library, not a better model.
+
 ---
 
 ## 6. Design decisions and their reasons
