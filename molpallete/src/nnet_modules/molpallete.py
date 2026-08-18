@@ -226,3 +226,54 @@ class MolPallete(nn.Module):
             rgroup_projection=z_R,
         )
         return batch
+
+    # ------------------------------------------------------------------ #
+    # Library hooks
+    #
+    # The R-Group Retrieval task scores against a library of every recommendable
+    # R-group in the corpus, embedded with the *current* projector.  Because the
+    # projector is still training, that library is only valid for the step that
+    # built it -- MolPLA rebuilds it at every validation epoch and so does
+    # `callbacks/RGroupLibraryRetrieval.py`.  These two hooks are the entry
+    # points; keeping them on the model means the callback and the standalone
+    # `build_library.py` cannot drift apart in how they embed.
+    # ------------------------------------------------------------------ #
+
+    @torch.no_grad()
+    def encode_rgroups(self, graph_batch) -> torch.Tensor:
+        """Embed R-group graphs into the retrieval co-embedding space.
+
+        Parameters
+        ----------
+        graph_batch
+            A PyG ``Batch`` of masked R-group graphs.
+
+        Returns
+        -------
+        torch.Tensor
+            ``(n_graphs, D)``, **not** L2-normalised -- callers normalise once,
+            just before building or querying the index, so a caller cannot
+            double-normalise without noticing.
+        """
+        encoded = self.nnet["graph_encoder"](graph_batch)
+        pooled = self.pool(encoded.node_embeddings, encoded.batch)
+        return self.nnet["rgroup_projector"](pooled)
+
+    @torch.no_grad()
+    def encode_queries(
+        self, node_embeddings: torch.Tensor, condvec: torch.Tensor
+    ) -> torch.Tensor:
+        """Project core-side linker nodes (+ condition vector) into the same space.
+
+        This is the inference-time entry point for lead optimization: give it the
+        linker node embeddings of a core template and the condition vector of the
+        R-group you want, and search the library with the result.
+        """
+        if condvec.shape[-1] != self.config.condvec_dim:
+            raise ValueError(
+                f"condvec width {condvec.shape[-1]} != configured condvec_dim "
+                f"{self.config.condvec_dim}"
+            )
+        return self.nnet["query_projector"](
+            torch.cat([node_embeddings, condvec.to(node_embeddings.dtype)], dim=-1)
+        )

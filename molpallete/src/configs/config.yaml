@@ -21,3 +21,15 @@ master_path: /home/mogan/
 debug_mode: true
 run_mode: train
 checkpoint_mode: false
+
+# Full-corpus R-group library retrieval (MolPLA's RGR evaluation).
+# Requires a vocabulary built by molpallete_preprocess/enumerate_rgroups.py;
+# the callback disables itself with a warning if none is found.
+rgroup_library:
+  enabled:            true
+  vocab_path:         null   # defaults to <corpus>/rgroup_vocab.pkl.gz
+  max_entries:        null   # null = the whole library; truncation inflates Hit@K
+  every_n_epochs:     1
+  enable_after_epoch: 2      # retrieval over random embeddings is noise
+  search_k:           1000   # MolPLA retrieves the top 1000
+  encode_batch_size:  1024

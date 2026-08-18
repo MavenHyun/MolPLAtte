@@ -24,6 +24,7 @@ from callbacks import (
     FAISSRetrieval,
     PredictionTable,
     RepresentationHealth,
+    RGroupLibraryRetrieval,
     SaveBestModelCheckpoint,
 )
 
@@ -160,6 +161,22 @@ def get_callbacks(config: DictConfig, ckpt_path: Path) -> List[pl.Callback]:
                         enable_after_epoch=3, out_dir=table_dir,
                         monitor=ckpt_monitor, mode=ckpt_mode),
     ]
+
+    # Full-corpus R-group library retrieval -- MolPLA's actual RGR evaluation.
+    # FAISSRetrieval above scores against a val-split gallery, which is a much
+    # easier problem; this scores against every recommendable R-group in the
+    # corpus and reports each Hit@K next to the frequency-prior baseline.
+    # Disables itself with a warning if no vocabulary has been built.
+    library_cfg = config.get("rgroup_library") or {}
+    if library_cfg.get("enabled", True):
+        callbacks.append(RGroupLibraryRetrieval(
+            vocab_path=library_cfg.get("vocab_path"),
+            max_entries=library_cfg.get("max_entries"),
+            every_n_epochs=int(library_cfg.get("every_n_epochs", 1)),
+            enable_after_epoch=int(library_cfg.get("enable_after_epoch", 2)),
+            search_k=int(library_cfg.get("search_k", 1000)),
+            encode_batch_size=int(library_cfg.get("encode_batch_size", 1024)),
+        ))
 
     health_cfg = config.get("representation_health") or {}
     if health_cfg.get("enabled", True):

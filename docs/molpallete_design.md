@@ -265,6 +265,79 @@ number justifies it empirically rather than by analogy to MolDAM.
 
 ---
 
+## 5.5 The R-group library (the RGR task)
+
+MolPLA's R-Group Retrieval framework does **not** score against in-batch
+negatives. It embeds *every recommendable R-group in the corpus* — 61,279 of them
+on GEOM — with the current R-group projector, indexes them with FAISS, and
+retrieves the top 1000 per query. MRR and Hit@{5,10,20,50,100,500,1000} are
+computed over that library. Without it there is no lead-optimization task; an
+in-batch gallery measures a much easier problem under a similar name.
+
+MolPallete builds it in two halves, because they have different lifetimes:
+
+| half | built by | depends on | rebuilt |
+|---|---|---|---|
+| **vocabulary** — distinct R-groups, canonical masked graphs, counts, condvecs | `molpallete_preprocess/enumerate_rgroups.py` | the corpus only | once per corpus |
+| **vector library** — those graphs embedded + FAISS index | `callbacks/RGroupLibraryRetrieval.py` (training) / `molpallete/src/build_library.py` (inference) | the projector's current weights | **every validation epoch** |
+
+The second half must be rebuilt continuously: a library embedded at epoch 3 is
+meaningless for a query embedded at epoch 7. MolPLA rebuilds it at every
+validation; so does the callback.
+
+**Keying.** MolPLA keys the vocabulary on the R-group's masked SMILES. MolPallete
+keys on the **WL subgraph hash** and carries SMILES as a label, because a masked
+linker atom is not a real chemical entity — two structurally different masked
+graphs can strip to the same SMILES (`*O` appears twice in the FlavorDB
+vocabulary with different counts). The hash is already what the corpus stores per
+R-group and what the contrastive loss uses for multi-positive grouping, so keying
+on it keeps one identity notion throughout.
+
+### Vocabularies built
+
+| corpus | distinct R-groups | occurrences | **effective size** | top-1 share |
+|---|---|---|---|---|
+| `flavor_v1/macfrag` | 5,663 | 399,141 | **31** | 19.31% |
+
+The most frequent entries are chemically sensible: `*O`, `*CO`, `*C`,
+`*c1ccccc1`, `*c1ccc(O)c(O)c1` (catechol), and glycoside sugars — the last
+unsurprising given FlavorDB is sugar-heavy.
+
+### Why every Hit@K is logged next to a prior baseline
+
+**Effective size 31 out of 5,663 distinct entries.** One R-group is 19% of all
+occurrences. This is not a 5,663-way retrieval problem, and Hit@K against it is
+mostly a measurement of the frequency prior. The callback therefore logs three
+numbers per cut-off:
+
+```
+library/hit@K        the model
+library/prior_hit@K  the constant "always return the K most frequent" predictor
+library/lift@K       the ratio
+```
+
+Measured on an **untrained** model over the full 5,663-row library:
+
+| K | hit@K | prior hit@K | lift |
+|---|---|---|---|
+| 1 | 0.0000 | 0.156 | 0.00 |
+| 10 | 0.0053 | 0.640 | 0.01 |
+| 100 | 0.0079 | 0.857 | 0.01 |
+| 1000 | 0.0979 | 0.947 | 0.10 |
+
+An untrained model reporting "Hit@1000 = 0.098" looks non-trivial until you see
+that always returning the 1000 most common R-groups scores 0.947. This is the
+mistake MolDAM made — its headline figure was framed as "47× above random", and
+re-scored against the frequency prior it landed *at* the prior. Random is the
+wrong reference. **`lift <= 1` means the model has learned nothing the prior does
+not already give you, whatever `hit@K` says.**
+
+Both retrieval evaluations are logged, under distinct prefixes so they cannot be
+confused: `{stage}/faiss/*` is the cheap val-split gallery, `{stage}/library/*`
+is the full corpus library.
+
+---
+
 ## 6. Design decisions and their reasons
 
 | Decision | Reason |
@@ -291,8 +364,8 @@ number justifies it empirically rather than by analogy to MolDAM.
 - **logQ estimator consistency.** The loss estimates `log q` from a running
   in-batch counter; `FAISSRetrieval` estimates it from val-split hash frequency.
   If those disagree the correction is inconsistent between train and eval.
-- **`vocab.py` / `lmdb_store.py`** are carried over from MolDAM_prep but not yet
-  wired into the driver; an R-group library builder is not yet written.
+- **`vocab.py` / `lmdb_store.py`** are carried over from MolDAM_prep and are now
+  superseded by `rgroup_library.py` for vocabulary purposes; they remain unwired.
 - **No pretraining run at scale yet.** The single-batch overfit check drives
   val/loss 15.28 -> 7.79 and val R@10 0.378 -> 0.647 over 60 epochs, which
   establishes that the objectives carry gradient signal but says nothing about

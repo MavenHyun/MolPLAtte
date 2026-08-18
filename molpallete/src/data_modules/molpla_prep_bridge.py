@@ -18,6 +18,8 @@ __all__ = [
     "build_instance",
     "hydrate",
     "path_for",
+    "load_vocabulary",
+    "rgroup_smiles",
     "sample_islinked",
     "subgraph_hash",
 ]
@@ -54,3 +56,4 @@ from molpallete_prep.graph_hash import subgraph_hash  # noqa: E402
 from molpallete_prep.lmdb_store import hydrate  # noqa: E402
 from molpallete_prep.molpla_instance import build_instance, sample_islinked  # noqa: E402
 from molpallete_prep.preprocess import path_for  # noqa: E402
+from molpallete_prep.rgroup_library import load_vocabulary, rgroup_smiles  # noqa: E402

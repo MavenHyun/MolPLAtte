@@ -28,16 +28,19 @@ live in **[`docs/molpallete_design.md`](docs/molpallete_design.md)**.
 ```
 docs/molpallete_design.md    design contract + measured results + open items
 molpallete_preprocess/       corpus builder      (see its own README)
-  preprocess_flavor.py         the driver
+  preprocess_flavor.py         corpus driver
+  enumerate_rgroups.py         R-group library vocabulary builder
   molpallete_prep/             the package
   scripts/build_all_corpora.sh
+  scripts/build_all_vocabs.sh
 molpallete/                  training repo
   src/configs/                 Hydra config groups
   src/data_modules/            four-view dataset + collate
   src/nnet_modules/            encoder + projection heads + composite model
   src/loss_modules/            dual InfoNCE + the three-objective module
   src/lightning_modules/       training wrapper
-  src/callbacks/               FAISS retrieval, prediction tables, representation health
+  src/callbacks/               FAISS retrieval, full-library RGR, prediction tables, health
+  src/build_library.py         export a trained FAISS R-group library for inference
 ```
 
 ---
@@ -101,14 +104,17 @@ python preprocess_flavor.py --source flavordb --method macfrag \
 # ... or build every corpus
 CORPORA=/home/mogan/corpora/molpallete ./scripts/build_all_corpora.sh
 
-# 2. Sanity-check the training loop (~40 s, CPU)
+# 2. Build the R-group library vocabulary (the RGR retrieval target space)
+python enumerate_rgroups.py --corpus /home/mogan/corpora/molpallete/flavor_v1/macfrag --workers 88
+
+# 3. Sanity-check the training loop (~40 s, CPU)
 cd ../molpallete/src
 python run.py --config-name config_debug \
   trainer_kwargs.fast_dev_run=1 trainer_kwargs.accelerator=cpu \
   data_module_kwargs.dataset_path=/home/mogan/corpora/molpallete \
   data_module_kwargs.num_workers=0 data_module_kwargs.persistent_workers=false
 
-# 3. Pretrain
+# 4. Pretrain
 python run.py --config-name config \
   data_module_kwargs.dataset_path=/home/mogan/corpora/molpallete \
   data_module_kwargs.dataset_version=flavor_v1 \
@@ -116,7 +122,30 @@ python run.py --config-name config \
   trainer_kwargs.accelerator=gpu trainer_kwargs.devices=1 \
   trainer_kwargs.precision=bf16-mixed \
   experiment_name=flavor_macfrag_v1
+
+# 5. Export the trained library for lead-optimization queries
+python build_library.py \
+  --checkpoint /home/mogan/checkpoints/flavor_macfrag_v1_best.pt \
+  --corpus /home/mogan/corpora/molpallete/flavor_v1/macfrag \
+  --config /home/mogan/corpora/molpallete/logs/pretrain_v1/.hydra/config.yaml \
+  --output /home/mogan/libraries/flavor_macfrag_v1
 ```
+
+## The R-group library
+
+MolPLA's retrieval task scores against **every recommendable R-group in the
+corpus**, not against in-batch negatives — that library is the lead-optimization
+task. MolPallete builds it in two halves: a static per-corpus **vocabulary**
+(`enumerate_rgroups.py`), and a **vector library** re-embedded every validation
+epoch because the projector is still training.
+
+The FlavorDB macfrag vocabulary has 5,663 distinct R-groups over 399,141
+occurrences — but an **effective size of 31**, with one R-group accounting for
+19% of occurrences. So every `hit@K` is logged beside `prior_hit@K` (the constant
+"return the K most frequent" predictor) and their ratio `lift@K`. On an untrained
+model, `hit@1000 = 0.098` against a prior of `0.947`: a number that looks
+non-trivial in isolation and is in fact far below the baseline. `lift <= 1` means
+the model has learned nothing the prior does not already give you.
 
 ## Corpora built
 
