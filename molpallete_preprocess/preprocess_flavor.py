@@ -1,5 +1,30 @@
 #!/usr/bin/env python
-"""Build a MolPallete pretraining corpus from FlavorDB or COCONUT.
+"""Build a MolPallete pretraining corpus from FlavorDB and/or COCONUT.
+
+One corpus, one or more sources.  ``--source flavordb coconut`` reads both and
+writes a single combined corpus, which is what the pretraining runs use: the
+flavor compounds are the in-domain set and the natural products supply scale and
+chemical diversity.  Building each source separately is still supported and is
+how the per-source ablations are produced.
+
+Deduplication
+-------------
+Duplicates are detected on the **canonical SMILES of the washed molecule** — not
+the raw input string, since washing strips salts and neutralises charges, so two
+different inputs can be the same molecule.  This catches duplicates *within* a
+source as well as across them, and both are common:
+
+* **Across sources**: ~0.8% of COCONUT matches a FlavorDB InChIKey exactly, ~1.9%
+  on the connectivity skeleton — the natural-product subset of flavor space.
+* **Within FlavorDB**: 25,509 InChIKeys collapse to 13,028 connectivity
+  skeletons, dominated by sugars (the sucrose skeleton appears under 283 distinct
+  CIDs).  Measured ~4% exact-structure duplicates after washing.
+
+Left in, these inflate the R-group frequency prior and give the retrieval metric
+a larger head to memorise.  On a collision the FlavorDB record wins
+deterministically — it is in-domain and carries the flavor labels — rather than
+whichever worker happened to finish first.  Counts are reported and recorded in
+the manifest.  Disable with ``--no-dedup``.
 
 Walks a source of molecules, washes each one, decomposes it into anchored
 cores + R-groups, and writes one ``.pt`` per molecule holding the intact graph
@@ -202,6 +227,11 @@ def _process_one(item: Tuple[str, str, str, dict]) -> Tuple[str, str, Optional[d
             "ok",
             {
                 "id": mol_id,
+                "source": source,
+                # Canonical SMILES of the WASHED molecule -- the dedup key. Washing
+                # strips salts and neutralises charges, so two different input
+                # strings can be the same molecule; the raw input is not a key.
+                "canonical": payload["smiles"],
                 "n_decomps": len(records),
                 "n_rgroups": [r["n_rgroups"] for r in records],
             },
@@ -226,18 +256,27 @@ def _chunked(iterable: Iterator, size: int) -> Iterator[list]:
 
 
 def _source_items(args, size_filter: SizeFilter, skip: set) -> Iterator[tuple]:
-    """Stream ``(mol_id, smiles, source, meta)`` tuples, sampled and resumed."""
+    """Stream ``(mol_id, smiles, source, meta)`` over every requested source.
+
+    Sources are read in the order given.  FlavorDB is listed first by convention
+    so its records enter the pool first, which matters only for readability --
+    duplicate resolution is by source name, not by arrival order.
+    """
     rng = random.Random(args.sample_seed)
     emitted = 0
-    for record in read_source(args.source, args.source_path, size_filter=size_filter):
-        if args.sample_fraction is not None and rng.random() >= args.sample_fraction:
-            continue
-        if record.mol_id in skip:
-            continue
-        yield (record.mol_id, record.smiles, record.source, record.meta)
-        emitted += 1
-        if args.limit_mols is not None and emitted >= args.limit_mols:
-            return
+    paths = {"flavordb": args.flavordb_path, "coconut": args.coconut_path}
+    for source in args.source:
+        for record in read_source(
+            source, paths.get(source), size_filter=size_filter
+        ):
+            if args.sample_fraction is not None and rng.random() >= args.sample_fraction:
+                continue
+            if record.mol_id in skip:
+                continue
+            yield (record.mol_id, record.smiles, record.source, record.meta)
+            emitted += 1
+            if args.limit_mols is not None and emitted >= args.limit_mols:
+                return
 
 
 def _build_method_kwargs(args) -> dict:
@@ -254,8 +293,21 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     source = parser.add_argument_group("source")
-    source.add_argument("--source", choices=("flavordb", "coconut"), required=True)
-    source.add_argument("--source-path", default=None, help="override the default path")
+    source.add_argument(
+        "--source",
+        nargs="+",
+        choices=("flavordb", "coconut"),
+        required=True,
+        help="one or more sources; several are merged into a single corpus",
+    )
+    source.add_argument("--flavordb-path", default=None)
+    source.add_argument("--coconut-path", default=None)
+    source.add_argument(
+        "--no-dedup",
+        action="store_true",
+        help="keep duplicate molecules (same washed structure). Duplicates inflate "
+        "the R-group frequency prior, so this is on by default.",
+    )
     source.add_argument("--min-heavy-atoms", type=int, default=5)
     source.add_argument(
         "--max-heavy-atoms",
@@ -360,8 +412,13 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     for key, value in [
         ("version", __version__),
-        ("source", args.source),
-        ("source_path", args.source_path or "<default>"),
+        ("sources", " + ".join(args.source)),
+        ("source paths", {
+            k: v for k, v in
+            [("flavordb", args.flavordb_path), ("coconut", args.coconut_path)]
+            if k in args.source
+        } or "<defaults>"),
+        ("dedup", not args.no_dedup),
         ("method", f"{args.method} ({family_of(args.method)} family)"),
         ("method_kwargs", method_kwargs),
         ("core_ratio", args.core_ratio),
@@ -377,6 +434,12 @@ def main(argv: Optional[List[str]] = None) -> int:
         print(f"[info] {key:16s} : {value}", flush=True)
 
     index: List[dict] = list(prior_index)
+    # canonical SMILES -> position in `index`. Records are written by the worker
+    # before the parent sees them, so duplicates are resolved after the fact by
+    # deleting the losing file -- cheap, because it is one file per molecule.
+    seen_canonical: Dict[str, int] = {}
+    n_deduped = 0
+    dedup_enabled = not args.no_dedup
     status_counts: Counter = Counter()
     started = time.time()
     last_report, last_time = 0, started
@@ -392,6 +455,33 @@ def main(argv: Optional[List[str]] = None) -> int:
             for _mol_id, status, entry in results:
                 status_counts[status] += 1
                 if entry is not None:
+                    if dedup_enabled:
+                        key = entry.get("canonical")
+                        previous = seen_canonical.get(key) if key else None
+                        if previous is not None:
+                            # Deterministic winner: FlavorDB is in-domain and
+                            # carries the flavor labels, so it beats COCONUT
+                            # regardless of which finished first.
+                            incumbent = index[previous]
+                            if (
+                                incumbent.get("source") != "flavordb"
+                                and entry.get("source") == "flavordb"
+                            ):
+                                loser, index[previous] = incumbent, entry
+                            else:
+                                loser = entry
+                            try:
+                                path_for(
+                                    out_path, loser["id"], args.layout
+                                ).unlink(missing_ok=True)
+                            except OSError:
+                                pass
+                            n_deduped += 1
+                            status_counts["duplicate_molecule"] += 1
+                            processed += 1
+                            continue
+                        if key:
+                            seen_canonical[key] = len(index)
                     index.append(entry)
                 processed += 1
             if processed - last_report >= args.progress_every:
@@ -415,7 +505,10 @@ def main(argv: Optional[List[str]] = None) -> int:
         # cardinality can shift between releases, which would silently invalidate
         # this corpus's embedding indices. Record the version that built it.
         "rdkit_version": rdkit.__version__,
-        "source": args.source,
+        "sources": list(args.source),
+        "source": args.source[0] if len(args.source) == 1 else "+".join(args.source),
+        "dedup": dedup_enabled,
+        "n_duplicates_removed": n_deduped,
         "method": args.method,
         "method_family": family_of(args.method),
         "decomposition_params": method_kwargs,
@@ -449,6 +542,9 @@ def main(argv: Optional[List[str]] = None) -> int:
             "total_mols_processed": processed,
             "n_records": len(index),
             "n_resumed": len(prior_index),
+            "n_records_per_source": dict(
+                Counter(e.get("source", "unknown") for e in index)
+            ),
             "status_counts": dict(status_counts),
             "elapsed_seconds": round(elapsed, 2),
             "throughput_mol_per_s": round(processed / max(elapsed, 1e-9), 2),
@@ -462,6 +558,18 @@ def main(argv: Optional[List[str]] = None) -> int:
         f"\n[done] processed {processed:,} in {elapsed:.1f}s "
         f"({processed / max(elapsed, 1e-9):.1f} mol/s)\n"
         f"[done] records written    : {len(index):,}\n"
+        + (
+            f"[done] per source         : "
+            f"{dict(Counter(e.get('source', 'unknown') for e in index))}\n"
+            if len(args.source) > 1
+            else ""
+        )
+        + (
+            f"[done] duplicates removed : {n_deduped:,} "
+            f"(same washed structure; FlavorDB kept on collision)\n"
+            if dedup_enabled
+            else ""
+        ) +
         f"[done] decompositions     : {total_decomps:,} "
         f"({total_decomps / max(len(index), 1):.2f} per molecule)\n"
         f"[done] R-groups           : {total_rgroups:,} "
