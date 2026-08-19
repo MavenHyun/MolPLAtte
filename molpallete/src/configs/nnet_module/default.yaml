@@ -12,7 +12,12 @@ nnet_module_kwargs:
   gnn_conv:                  GINEConv
   num_conv:                  5
   graph_pooling:             mean
-  condvec_dim:               97       # must match data_module_kwargs.condvec_dim
+  condvec_dim:               0        # 0 = NO condition vector (MolDAM-style).
+                                      # MolPLA conditions the query on the TARGET
+                                      # R-group's functional groups, which leaks the
+                                      # answer into the query: zeroing it at inference
+                                      # took hit@1 from 0.6111 to 0.0000. Set >0 only
+                                      # to reproduce that setup deliberately.
 
   # SimSiam-style stop-gradient toggles (MolPLA settings.yaml sg_P/sg_R/sg_Q).
   # All three losses are contrastive with no negative-free branch, so these are

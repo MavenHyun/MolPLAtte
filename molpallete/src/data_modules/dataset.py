@@ -98,8 +98,11 @@ class MolPalleteDataset(Dataset):
             )
         meta = json.loads(meta_path.read_text())
 
+        # condvec_dim = 0 means the model does not use the condition vector at
+        # all, so the corpus's stored width is irrelevant and must not be
+        # enforced -- the corpus still carries condvecs, they are simply ignored.
         corpus_dim = meta.get("condvec_dim")
-        if corpus_dim is not None and corpus_dim != condvec_dim:
+        if condvec_dim > 0 and corpus_dim is not None and corpus_dim != condvec_dim:
             raise ValueError(
                 f"condvec_dim mismatch: model expects {condvec_dim}, corpus "
                 f"{self.root} was built with {corpus_dim} "

@@ -114,7 +114,18 @@ class MolPalleteConfig:
 
         self.graph_encoder_kwargs.setdefault("gnn_conv", self.gnn_conv)
         self.graph_encoder_kwargs.setdefault("num_conv", self.num_conv)
-        # The query head alone sees the condition vector (paper Eq. 11).
+        # condvec_dim = 0 removes the condition vector entirely: the query is
+        # then the core-side linker node embedding alone. That is what MolDAM
+        # does, and it is what makes retrieval a genuine core -> R-group task.
+        #
+        # MolPLA conditions the query on a functional-group vector OF THE TARGET
+        # R-GROUP (paper Eq. 11), so the query carries a description of the
+        # answer. Measured on a model trained with it: zeroing the condvec at
+        # inference drops hit@1 from 0.6111 to EXACTLY 0.0000 on the queries that
+        # had one, and the query projector weights the 97 condvec dimensions
+        # 4.09x more per-dimension than the 300 node dimensions. MolPLA's own
+        # `Cond. None` ablation collapses its MRR 0.2616 -> 0.0056; a 47x drop
+        # from removing an "auxiliary" hint means it was never auxiliary.
         if self.query_projector_kwargs.get("input_dim") is None:
             self.query_projector_kwargs["input_dim"] = self.hidden_dim + self.condvec_dim
         if self.graph_pooling not in _POOLING:
@@ -202,22 +213,23 @@ class MolPallete(nn.Module):
 
         # --- loss 3: R-group retrieval, one query per detached R-group ------
         n_rgroups = int(joint_R_idx.numel())
+        use_condvec = c.condvec_dim > 0
         condvec = batch["condvec"].to(H.dtype)
         # The retrieval callbacks build their dedup gallery assuming query and
         # target rows are 1:1 and in the same order. A per-molecule aggregation
         # slipping into either branch would misalign them silently and produce
         # plausible-but-wrong R@K, so state the invariant here rather than trust it.
-        if condvec.shape[0] != n_rgroups:
+        if use_condvec and condvec.shape[0] != n_rgroups:
             raise ValueError(
                 f"condvec has {condvec.shape[0]} rows but the batch has "
                 f"{n_rgroups} detached R-groups"
             )
-        if condvec.shape[-1] != c.condvec_dim:
+        if use_condvec and condvec.shape[-1] != c.condvec_dim:
             raise ValueError(
                 f"condvec width {condvec.shape[-1]} != configured condvec_dim "
                 f"{c.condvec_dim}; the corpus and nnet_module config disagree"
             )
-        query_input = torch.cat([q_i, condvec], dim=-1)
+        query_input = torch.cat([q_i, condvec], dim=-1) if use_condvec else q_i
         z_C = self.nnet["query_projector"](query_input)
         rgroup_pooled = self.pool(
             R_nodes, batch["R_pool_index"], size=max(n_rgroups, 1)

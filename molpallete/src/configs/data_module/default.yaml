@@ -32,7 +32,7 @@ data_module_kwargs:
   # deliberately the paper's `Cond. None` ablation -- an unfed pocket run
   # shows up as collapsed retrieval rather than plausible noise.
   condvec_mode:           neutral
-  condvec_dim:            97
+  condvec_dim:            0
   # Cap on detached R-groups per instance, i.e. rows contributed to the
   # per-linker retrieval loss.
   max_rgroups:            8
