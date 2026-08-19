@@ -185,13 +185,13 @@ directly comparable to the combined ones on record counts.
 
 ```
 MolPallete/
-  docs/molpallete_design.md      this file
   molpallete_preprocess/         corpus builder   (mirrors MolDAM_prep)
     preprocess_flavor.py           the driver
     molpallete_prep/               the package
     scripts/build_all_corpora.sh
     docs/corpus_format.md
   molpallete/                    training repo    (mirrors MolDAM)
+    docs/molpallete_design.md      this file
     src/{configs,data_modules,nnet_modules,loss_modules,lightning_modules,callbacks,scripts}
 ```
 

@@ -19,14 +19,13 @@ It combines three lineages:
   489,395 natural products, in place of MolPLA's drug-like GEOM.
 
 The design contract, every measured number, and the reasoning behind each choice
-live in **[`docs/molpallete_design.md`](docs/molpallete_design.md)**.
+live in **[`molpallete/docs/molpallete_design.md`](molpallete/docs/molpallete_design.md)**.
 
 ---
 
 ## Repo layout
 
 ```
-docs/molpallete_design.md    design contract + measured results + open items
 molpallete_preprocess/       corpus builder      (see its own README)
   preprocess_flavor.py         corpus driver
   enumerate_rgroups.py         R-group library vocabulary builder
@@ -34,6 +33,7 @@ molpallete_preprocess/       corpus builder      (see its own README)
   scripts/build_all_corpora.sh
   scripts/build_all_vocabs.sh
 molpallete/                  training repo
+  docs/molpallete_design.md    design contract + measured results + open items
   src/configs/                 Hydra config groups
   src/data_modules/            four-view dataset + collate
   src/nnet_modules/            encoder + projection heads + composite model

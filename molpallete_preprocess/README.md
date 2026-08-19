@@ -1,6 +1,6 @@
 # molpallete_preprocess
 
-Corpus builder for [MolPallete](../docs/molpallete_design.md): flavor compounds and
+Corpus builder for [MolPallete](../molpallete/docs/molpallete_design.md): flavor compounds and
 natural products → anchored **core + k R-groups** records for MolPLA-style
 masked-linker pretraining.
 

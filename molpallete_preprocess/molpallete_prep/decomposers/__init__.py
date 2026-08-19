@@ -22,7 +22,7 @@ decompositions have k >= 2 — MolPLA's ``islinked`` subset enumeration and the
 core-decoration objective are both degenerate at k = 1.  ``macfrag`` re-framed
 through the fragment tree yields **3.34 R-groups per core with 89.7% at k >= 2**
 and a mean core of 22.5 heavy atoms, closely matching the ~20.8-heavy-atom cores
-MolPLA reports.  See ``docs/molpallete_design.md`` §3.1.
+MolPLA reports.  See ``../molpallete/docs/molpallete_design.md`` §3.1.
 """
 
 from __future__ import annotations
