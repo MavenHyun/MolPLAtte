@@ -499,6 +499,76 @@ reflects an easier library, not a better model.
 
 ---
 
+## 5.6 Assembly head — 30 epochs, head on vs off
+
+Identical settings, `assembly.enabled` the only difference. Both logged to wandb
+project `NoahsFarm_MolPallete`.
+
+| metric | baseline | assembly | delta |
+|---|---|---|---|
+| library MRR | 0.8147 | 0.8285 | +0.0138 |
+| library Hit@1 | 0.7394 | 0.7546 | +0.0152 |
+| library Hit@10 | 0.9420 | 0.9502 | +0.0081 |
+| Hit@1 lift over prior | 2.78x | 2.84x | |
+| val/loss | 5.685 | 5.467 | -0.218 |
+| val/loss graph | 0.7403 | 0.6007 | -0.140 |
+| val/loss linker | 6.5209 | 6.3825 | -0.138 |
+| val/loss rgroup | 4.2930 | 4.2209 | -0.072 |
+
+**Retrieval did not degrade.** That was the stated risk -- MolPLA names
+"adversarial optimization trajectories incurred by three different loss
+objectives" as its unresolved limitation, and this adds a fourth. Instead all
+three contrastive losses *improved*, which is what an auxiliary objective that
+regularises the shared encoder looks like rather than one that competes with it.
+
+### But the effect is inside the noise floor
+
+Two **baseline** runs, same seed, same 30 epochs, differing only in
+`num_workers` (which reorders dataloader draws and so changes which
+`(decomposition, islinked)` pairs are sampled):
+
+```
+num_workers=24   Hit@1 = 0.7534
+num_workers=12   Hit@1 = 0.7394
+spread                  0.0140
+assembly delta          0.0152
+```
+
+The improvement is the same size as baseline-to-baseline variance. **It should
+not be reported as an effect** without seed replicates -- 3-5 per arm would
+establish whether it survives. The loss improvements are more consistent across
+terms and somewhat more persuasive, but they are also a single sample.
+
+### Recovery accuracy needs its own baseline
+
+`recover_acc = 0.9948` looks conclusive and is not. Measured majority-class
+rates on the corpus:
+
+| target | classes | majority | model | headroom closed |
+|---|---|---|---|---|
+| `hybridization` | 3 | 0.564 | 0.9922 | **98.2%** |
+| `is_conjugated` | 2 | 0.653 | 0.9965 | **99.0%** |
+| `atomic_num` | 4 | 0.715 | 0.9813 | **93.4%** |
+| `is_aromatic` | 2 | 0.831 | 0.9998 | 99.9% |
+| `num_explicit_hs` | 2 | 0.862 | 0.9938 | 95.5% |
+| `bond_type` | 3 | 0.873 | 0.9949 | 96.0% |
+| `bond_stereo` | 3 | 0.989 | 0.9950 | 55.4% |
+| `formal_charge` | **1** | 1.000 | 0.9997 | degenerate |
+| `edge_is_aromatic` | **1** | 1.000 | 1.0000 | degenerate |
+
+Two targets are **structurally constant on this corpus** and I should have
+predicted both: `wash()` neutralises charges, so a joint atom is always neutral;
+and cut bonds are never ring bonds, so the reformed bond is never aromatic. They
+scored ~100% for free and padded the macro average.
+
+Dropped from the default target set. The loss now logs `majority` and
+`headroom` beside every attribute and excludes degenerate targets from the macro
+mean -- the same discipline as `library/lift@K`. Real learning is on
+`hybridization`, `is_conjugated` and `atomic_num`, where the model closes
+93-99% of a genuine gap.
+
+---
+
 ## 6. Design decisions and their reasons
 
 | Decision | Reason |

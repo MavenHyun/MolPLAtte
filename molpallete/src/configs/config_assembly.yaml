@@ -20,9 +20,16 @@ assembly:
                        # different loss objectives" -- a fourth at full weight is
                        # the obvious way to make that worse. Sweep this.
   head_kwargs:
-    # Wider than the minimal set: hybridization and aromaticity matter for
-    # whether the reformed bond is chemically sane.
-    node_attrs: [atomic_num, formal_charge, num_explicit_hs, hybridization, is_aromatic]
-    edge_attrs: [bond_type, edge_is_aromatic, is_conjugated, bond_stereo]
+    # formal_charge and edge_is_aromatic are DROPPED: both are structurally
+    # constant on this corpus (measured 1 class each). wash() neutralises
+    # charges, and cut bonds are never ring bonds, so the reformed bond is never
+    # aromatic. They cost head capacity and score ~100% for free.
+    #
+    # Measured majority-class rates for the rest, which is what makes them worth
+    # predicting: hybridization 0.564, is_conjugated 0.653, atomic_num 0.715,
+    # is_aromatic 0.831, num_explicit_hs 0.862, bond_type 0.873.
+    # bond_stereo is retained but is nearly degenerate at 0.989.
+    node_attrs: [atomic_num, num_explicit_hs, hybridization, is_aromatic]
+    edge_attrs: [bond_type, is_conjugated, bond_stereo]
     fusion:     concat
     coupling:   false

@@ -91,7 +91,25 @@ class AssemblyLoss(nn.Module):
 
     @torch.no_grad()
     def eval_metrics(self, batch: Dict) -> Dict[str, torch.Tensor]:
-        """Per-attribute recovery accuracy, plus a macro average."""
+        """Per-attribute recovery accuracy, each beside its majority-class rate.
+
+        Raw accuracy on these targets is close to meaningless on its own: some are
+        near-constant, and two are *structurally* constant on a washed,
+        non-ring-cut corpus --
+
+        ``formal_charge``   ``wash()`` neutralises charges, so a joint atom is
+                            always neutral. Measured: 1 class.
+        ``edge_is_aromatic`` cut bonds are never ring bonds (``_filter_cleavable``
+                            drops them), so the reformed bond is never aromatic.
+                            Measured: 1 class.
+
+        Both score ~100% for free and inflate the macro average. So every
+        attribute also reports ``majority`` (the constant-predictor rate on this
+        batch) and ``headroom`` (the fraction of the gap above it that the model
+        actually closed), and the macro average is taken over **non-degenerate**
+        targets only. Same discipline as ``library/lift@K``: an accuracy without
+        its baseline is not a result.
+        """
         out: Dict[str, torch.Tensor] = {}
         accs = []
         for pred_key, true_key, tag in (
@@ -106,9 +124,20 @@ class AssemblyLoss(nn.Module):
                     continue
                 if target.shape[0] != logits.shape[0]:
                     continue
-                acc = (logits.argmax(dim=-1) == target.to(logits.device)).float().mean()
+                t = target.to(logits.device)
+                acc = (logits.argmax(dim=-1) == t).float().mean()
                 out[f"assembly/{tag}/{attr}"] = acc
-                accs.append(acc)
+
+                # Constant-predictor rate on this batch.
+                counts = torch.bincount(t)
+                majority = counts.max().float() / max(t.numel(), 1)
+                out[f"assembly/{tag}/{attr}/majority"] = majority
+                gap = 1.0 - majority
+                if gap > 1e-6:
+                    out[f"assembly/{tag}/{attr}/headroom"] = (acc - majority) / gap
+                    accs.append(acc)
+                # else: degenerate on this corpus -- excluded from the macro mean
+                # rather than allowed to pad it toward 1.0.
         if accs:
             out["assembly/recover_acc"] = torch.stack(accs).mean()
         return out
