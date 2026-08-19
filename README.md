@@ -176,12 +176,23 @@ one's 5,663, so a higher MRR here reflects an easier library, not a better model
 
 ## Corpora built
 
-| corpus | records | dec/mol | R-groups/dec | size |
-|---|---|---|---|---|
-| `flavordb_full/macfrag` *(default)* | 20,428 | 7.27 | 2.69 | 242 MB |
-| `flavordb_full/naveja_recap` | 23,216 | 8.76 | 1.07 | 231 MB |
-| `flavordb_full/bemis_murcko` | 19,121 | 1.00 | 5.17 | 166 MB |
-| `flavordb_full/synton` | 12,084 | 2.52 | 1.12 | 111 MB |
+| method | records | dec/mol | R-groups/dec | library | effective |
+|---|---|---|---|---|---|
+| **`macfrag`** *(default)* | 369,881 | 7.57 | **3.12** | 48,671 | 32 |
+| `naveja_recap` | 411,456 | 8.20 | 1.08 | 113,362 | 283 |
+| `bemis_murcko` | 299,868 | 1.00 | 3.64 | 22,814 | 30 |
+| `synton` | 168,981 | 3.15 | 1.32 | 34,557 | 744 |
+
+All four are built from `coconut-flavordb_full`, the single combined corpus
+(351,382 COCONUT + 18,499 FlavorDB after deduplication). Each has its R-group
+library vocabulary built and hash-version matched.
+
+Note the anti-correlation between the last three columns: `macfrag` gives the
+richest decoration (3.12 R-groups per decomposition) but the most degenerate
+retrieval library (effective size 32), while `synton` is the reverse. The same
+property that makes decoration learnable makes retrieval easier to fake, so
+`macfrag` retrieval numbers must be read against their frequency prior.
+
 
 | **`coconut-flavordb_full/macfrag`** *(primary)* | **369,881** | **7.57** | **3.12** | 4.3 GB |
 | `coconut_full/macfrag` | 354,515 | 7.56 | 3.13 | 4.1 GB |

@@ -161,10 +161,15 @@ MolDAM's `{scale}` slot convention (`zinc_1pct`), so a subsampled build would be
 
 | corpus | sources | records | note |
 |---|---|---|---|
-| `coconut-flavordb_full` | both | 369,881 | **canonical** — hash v2 |
-| `coconut-flavordb_full_hashv1` | both | 369,881 | superseded; kept only for the §5 hash comparison |
-| `coconut_full` | COCONUT | 354,515 | source ablation |
-| `flavordb_full` | FlavorDB | 20,428 | source ablation |
+| `coconut-flavordb_full` | both | 369,881 (macfrag) | the only corpus |
+
+Per-source corpora (`coconut_full`, `flavordb_full`) and the pre-hash-fix
+`coconut-flavordb_full_hashv1` were **deleted** on 2026-08-19: the source
+ablation is not a planned experiment, and the hash comparison in §5 is already
+recorded. All three are derived data and rebuildable from
+`scripts/build_combined.sh` against the untouched source datasets, at roughly
+5 min per corpus plus 4 min per vocabulary.
+
 
 Each holds one sub-directory per decomposition method (`macfrag`,
 `naveja_recap`, `bemis_murcko`, `synton`). `_full` means no subsampling; the
