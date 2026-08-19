@@ -41,6 +41,7 @@ from dataclasses import dataclass, field, fields
 from typing import Dict, Optional
 
 import torch
+import torch.nn.functional as F
 from torch import nn
 from torch_geometric.nn import global_add_pool, global_mean_pool
 
@@ -239,9 +240,23 @@ class MolPallete(nn.Module):
             graph_contrastive=(z_G, z_Q),
             linker_contrastive=(z_m, z_p),
             rgroup_contrastive=(z_C, z_R),
-            # Exposed under stable names for the retrieval callbacks.
-            query_projection=z_C,
-            rgroup_projection=z_R,
+            # Exposed for the retrieval callbacks, L2-NORMALISED.
+            #
+            # MolDAM normalises inside its retrieval head, so every consumer got
+            # unit vectors. MolPallete moved normalisation into the loss
+            # (DualInfoNCE normalises internally) and the callbacks inherited the
+            # old assumption -- FAISSRetrieval and PredictionTable were ranking by
+            # RAW inner product, dominated by vector magnitude. Measured on the
+            # trained checkpoint: norms span 26-125 (query) and 15-253 (target),
+            # giving batch R@1 of 0.0023 against 0.1172 for cosine, with only 43%
+            # top-1 agreement between the two rankings.
+            #
+            # Normalising here restores a single source of truth. The loss's own
+            # F.normalize becomes redundant but harmless, and gradients are
+            # unchanged: L2 normalisation is idempotent, so re-normalising a unit
+            # vector is the identity on its tangent space.
+            query_projection=F.normalize(z_C, dim=-1),
+            rgroup_projection=F.normalize(z_R, dim=-1),
         )
         return batch
 

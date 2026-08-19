@@ -87,20 +87,32 @@ class PredictionTable(pl.Callback):
             return
 
         # Row identity. MolDAM keyed rows by ZINC id + core hash; MolPallete's
-        # unit is a linker, which belongs to an *instance*
-        # ("{mol_id}#{decomp_idx}-{islinked}"), so identity has to be looked up
-        # through rgroup_to_sample. All three lookups are optional: a missing
-        # one costs a blank column, never the table.
-        r2s        = batch.get("rgroup_to_sample")
-        inst_ids   = batch.get("instance_ids")
-        p_hashes   = batch.get("P_hashes")
+        # unit is a *linker*, and there are J of those against B instances, so
+        # the row must be mapped back through joint_sample.
+        #
+        # This previously read "rgroup_to_sample", which this collate does not
+        # emit -- the key is "joint_sample". The lookup silently fell back to
+        # s = i, labelling linker row i with instance_ids[i]. Those are different
+        # axes (J != B), so query_instance_id was MISLABELLED rather than blank,
+        # which is the worse failure: a wrong id reads as a real one.
+        #
+        # Fail loudly on a missing/mismatched map instead of degrading, for the
+        # same reason.
+        j2s      = batch.get("joint_sample")
+        inst_ids = batch.get("instance_ids")
+        if j2s is None or inst_ids is None or len(j2s) != len(hashes):
+            log = logging.getLogger(__name__)
+            log.warning(
+                "[PredictionTable] cannot map linkers to instances "
+                "(joint_sample=%s, hashes=%d) -- skipping this batch rather than "
+                "emitting unlabelled rows",
+                None if j2s is None else len(j2s), len(hashes),
+            )
+            return
         for i, h in enumerate(hashes):
-            s = int(r2s[i]) if r2s is not None else i
+            s = int(j2s[i])
             self._rows.append({
-                "instance_id": (inst_ids[s] if inst_ids is not None
-                                and s < len(inst_ids) else ""),
-                "query_hash":  (p_hashes[s] if p_hashes is not None
-                                and s < len(p_hashes) else ""),
+                "instance_id": inst_ids[s] if s < len(inst_ids) else "",
                 "target_hash": str(h),
             })
         self._q.append(q.detach().cpu())
@@ -169,7 +181,7 @@ class PredictionTable(pl.Callback):
 
         n_rows = min(self.max_rows, len(rows_kept), N)
         cols = ["epoch", self.monitor,
-                "query_instance_id", "query_hash", "target_hash",
+                "query_instance_id", "target_hash",
                 "retrieved_instance_ids", "retrieved_target_hashes",
                 "retrieved_sims", "positive_rank"]
         data = []
@@ -186,7 +198,6 @@ class PredictionTable(pl.Callback):
                 trainer.current_epoch,
                 f"{current:.6f}",
                 rows_kept[i]["instance_id"],
-                rows_kept[i]["query_hash"],
                 rows_kept[i]["target_hash"],
                 # " | " between retrieved items: kept from MolDAM even though
                 # MolPallete's target_hash is a single hash rather than a
