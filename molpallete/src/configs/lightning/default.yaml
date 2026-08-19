@@ -12,3 +12,8 @@ lightning_module_kwargs:
     graph_contrastive:   1.0
     linker_contrastive:  0.1
     rgroup_contrastive:  1.0
+  # Extra loss terms to log individually when present. The assembly loss reports
+  # its recovery and coupling halves separately -- without this only the combined
+  # `loss/assembly` is visible, and a coupling term that has collapsed to zero
+  # would be indistinguishable from one that is working.
+  sub_components: [assembly_recovery, assembly_coupling]

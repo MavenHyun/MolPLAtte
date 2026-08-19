@@ -35,3 +35,31 @@ rgroup_library:
   encode_batch_size:  1024
   max_queries:        20000  # exact search is n_queries x n_rows x dim; null = all.
                              # Truncation is seeded and logged, never silent.
+
+# ---------------------------------------------------------------------------
+# Assembly head (core decoration) -- ONE switch.
+#
+# Retrieval says WHICH R-group belongs at a joint; the joint is masked, so the
+# shared linker atom's identity and the bond that forms are unknown and the
+# R-group cannot actually be attached. This head predicts them back.
+#
+# `enabled` drives all three settings the head needs (nnet builds it, loss
+# creates its term, dataset derives the targets). Setting those individually is
+# a footgun -- a head without targets trains on nothing while logging a
+# plausible loss -- so main._apply_assembly_switch propagates them together.
+#
+#   python run.py assembly.enabled=true
+# ---------------------------------------------------------------------------
+assembly:
+  enabled:     false
+  head:        AssemblyHead
+  loss_weight: 0.5        # weight in the total loss alongside the three contrastive terms
+  head_kwargs:
+    node_attrs: null      # null = minimal set (atomic_num, formal_charge, num_explicit_hs)
+    edge_attrs: null      # null = [bond_type]
+    fusion:     concat    # concat | mean | gate
+    coupling:   false     # linker_contrastive already couples joints
+  loss_kwargs:
+    recovery_weight: 1.0
+    coupling_weight: 0.0
+    temperature:     0.1

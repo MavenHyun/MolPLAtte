@@ -8,7 +8,7 @@ from typing import List, Optional
 import pytorch_lightning as pl
 import torch
 import torch.nn as nn
-from omegaconf import DictConfig, OmegaConf
+from omegaconf import DictConfig, OmegaConf, open_dict
 
 import data_modules as dm
 from data_modules import MolPalleteDataModule       # noqa: F401  (resolved via getattr)
@@ -43,12 +43,64 @@ def get_init_config(config: DictConfig) -> DictConfig:
         os.environ["HF_TOKEN"] = config.api.huggingface
 
     pl.seed_everything(config.random_seed, workers=True)
+    _apply_assembly_switch(config)
 
     base_path = Path(config.master_path)
     ckpt_path = base_path / "checkpoints"
     ckpt_path.mkdir(parents=True, exist_ok=True)
 
     return config, base_path, ckpt_path
+
+def _apply_assembly_switch(config: DictConfig) -> None:
+    """Drive every assembly-related setting from the single ``assembly.enabled`` knob.
+
+    The head needs three things set consistently: the nnet must build it, the
+    loss must create its term, and the dataset must derive the pre-mask targets.
+    Setting any subset silently produces a broken run -- most insidiously
+    ``assembly_head`` without ``need_assembly_targets``, which builds the head,
+    feeds it no targets, and trains on nothing while logging a plausible loss.
+    One switch, propagated here, makes that unrepresentable.
+
+    Sub-keys under ``assembly`` are still honoured, so the switch sets the
+    defaults and anything explicitly overridden on the command line wins.
+    """
+    acfg = config.get("assembly") or {}
+    OmegaConf.set_struct(config.nnet_module_kwargs, False)
+    OmegaConf.set_struct(config.loss_module_kwargs, False)
+    OmegaConf.set_struct(config.data_module_kwargs, False)
+    if not acfg.get("enabled", False):
+        # Explicitly clear, so a stale override cannot half-enable the head.
+        config.nnet_module_kwargs.assembly_head = None
+        config.loss_module_kwargs.loss_assembly_kwargs = None
+        config.data_module_kwargs.need_assembly_targets = False
+        return
+
+    config.data_module_kwargs.need_assembly_targets = True
+    config.nnet_module_kwargs.assembly_head = acfg.get("head", "AssemblyHead")
+    head_kwargs = OmegaConf.to_container(acfg.get("head_kwargs") or {}, resolve=True)
+    existing = OmegaConf.to_container(
+        config.nnet_module_kwargs.get("assembly_head_kwargs") or {}, resolve=True
+    )
+    existing.update({k: v for k, v in head_kwargs.items() if v is not None})
+    config.nnet_module_kwargs.assembly_head_kwargs = existing
+
+    loss_kwargs = OmegaConf.to_container(acfg.get("loss_kwargs") or {}, resolve=True)
+    config.loss_module_kwargs.loss_assembly_kwargs = loss_kwargs or {}
+
+    weights = config.lightning_module_kwargs.get("loss_weights")
+    if weights is not None and "assembly" not in weights:
+        # loss_weights comes out of Hydra in struct mode, which forbids new keys.
+        with open_dict(weights):
+            weights["assembly"] = acfg.get("loss_weight", 0.5)
+
+    logging.info(
+        "Assembly head ENABLED  [%s, fusion=%s, coupling=%s, weight=%s]",
+        config.nnet_module_kwargs.assembly_head,
+        existing.get("fusion", "concat"),
+        existing.get("coupling", False),
+        (weights or {}).get("assembly"),
+    )
+
 
 def get_data_module(config: DictConfig, base_path: Path) -> MolPalleteDataModule:
     if config.data_module_kwargs.get("dataset_path") is None:
