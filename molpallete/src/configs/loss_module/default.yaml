@@ -26,7 +26,14 @@ loss_module_kwargs:
     # cosine ANN with no re-ranking. main.py derives FAISSRetrieval's
     # popularity_correction from this flag so training and evaluation cannot
     # disagree about what the similarity means.
-    logq_correction:         true
+    # FALSE, on MolDAM's evidence (devlog Phase 10). Training-side logQ lost
+    # 14% there (r@10 0.5792 vs 0.6705): q is estimated from batch counts, so it
+    # floors at 1/batch_size while true frequencies reach ~3e-5 -- every rare
+    # chemistry has its rarity understated up to 65x, correcting the head and not
+    # the tail. Their verdict: "Do not adopt logq_correction=True as-is."
+    # The correction belongs at SCORING time instead -- see
+    # callbacks/RGroupLibraryRetrieval.py.
+    logq_correction:         false
     # A single R-group hash can appear several times within one batch. Treat
     # every row sharing the target hash as a positive instead of scoring the
     # duplicates as negatives -- otherwise the loss is actively penalised for

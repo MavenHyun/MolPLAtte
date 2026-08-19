@@ -237,6 +237,8 @@ def get_callbacks(config: DictConfig, ckpt_path: Path) -> List[pl.Callback]:
             search_k=int(library_cfg.get("search_k", 1000)),
             encode_batch_size=int(library_cfg.get("encode_batch_size", 1024)),
             max_queries=library_cfg.get("max_queries", 20000),
+            temperature=_retrieval_temperature(config),
+            popularity_coef=float(library_cfg.get("popularity_coef", 1.0)),
         ))
 
     health_cfg = config.get("representation_health") or {}

@@ -90,6 +90,8 @@ class RGroupLibraryRetrieval(pl.Callback):
         search_k: int = 1000,
         encode_batch_size: int = 1024,
         max_queries: Optional[int] = 20000,
+        temperature: float = 0.01,
+        popularity_coef: float = 1.0,
     ) -> None:
         super().__init__()
         self.vocab_path = vocab_path
@@ -99,8 +101,14 @@ class RGroupLibraryRetrieval(pl.Callback):
         self.search_k = search_k
         self.encode_batch_size = encode_batch_size
         self.max_queries = max_queries
+        # Must match the R-group loss temperature: the correction is
+        # sim/tau + coef * log p, and tau sets the scale the two terms trade at.
+        self.temperature = temperature
+        # MolDAM found the optimum at exactly the theoretically predicted 1.0.
+        self.popularity_coef = popularity_coef
 
         self._vocab = None
+        self._log_prior = None
         self._disabled = False
         self._queries: List[torch.Tensor] = []
         self._target_hashes: List[str] = []
@@ -131,6 +139,10 @@ class RGroupLibraryRetrieval(pl.Callback):
             )
             self._disabled = True
             return False
+
+        # log p(k) over library rows, for the scoring-time correction above.
+        prior = np.asarray(self._vocab.frequency_prior, dtype=np.float64)
+        self._log_prior = np.log(np.clip(prior, 1e-12, None)).astype(np.float32)
 
         logger.info(
             "[RGroupLibraryRetrieval] library: %s rows, effective size %.0f, "
@@ -238,10 +250,40 @@ class RGroupLibraryRetrieval(pl.Callback):
             index = faiss.IndexFlatIP(library.shape[1])
             index.add(library)
             k = min(self.search_k, library.shape[0])
-            _scores, retrieved = index.search(queries, k)
+            scores, retrieved = index.search(queries, k)
         except Exception as exc:  # noqa: BLE001
             logger.warning("[RGroupLibraryRetrieval] FAISS search failed: %s", exc)
             return
+
+        # ---- popularity-corrected ranking (MolDAM devlog Phase 10) -----------
+        # InfoNCE's Bayes-optimal critic is f*(q,k) = log p(k|q) - log p(k): it
+        # deliberately DISCOUNTS popularity, estimating PMI rather than the
+        # posterior. hit@K rewards the posterior. With a skewed p(k) -- ours has
+        # effective vocabulary 32 -- those orderings diverge, so ranking a
+        # PMI-trained model by pure similarity and comparing it to a
+        # posterior-optimal frequency prior is not a fair test.
+        #
+        # MolDAM drew the conclusion "no configuration beats the frequency prior"
+        # across 7 checkpoints, 6 architectures and 2 losses on exactly that
+        # mistake, then overturned it in Phase 10: adding log p back at SCORING
+        # time took their r@10 from 0.3805 (below a 0.4974 prior) to 0.6646,
+        # i.e. 1.34x the prior, with the optimum at the theoretically predicted
+        # coefficient of 1.0.
+        #
+        # Both rankings are logged. `hit@K` stays pure-similarity so it remains
+        # comparable to earlier runs; `corrected_hit@K` is the one to read.
+        corrected = None
+        if self._log_prior is not None:
+            # CAVEAT: this re-ranks within the similarity top-k, not the whole
+            # library, so an item the correction would promote from outside the
+            # top-k cannot be recovered. With search_k=1000 that mostly affects
+            # hit@1000; hit@1..100 are essentially unaffected.
+            adj = (
+                scores / max(self.temperature, 1e-8)
+                + self.popularity_coef * self._log_prior[retrieved]
+            )
+            order = np.argsort(-adj, axis=1)
+            corrected = np.take_along_axis(retrieved, order, axis=1)
 
         stage = "test" if trainer.testing else "val"
 
@@ -299,6 +341,14 @@ class RGroupLibraryRetrieval(pl.Callback):
             metrics[f"{stage}/library/coverage"] = float(
                 len(set(retrieved.flatten().tolist())) / max(library.shape[0], 1)
             )
+        if corrected is not None:
+            chits = corrected == target_rows[:, None]
+            chas = chits.any(axis=1)
+            cfirst = np.where(chas, chits.argmax(axis=1) + 1, 0)
+            metrics[f"{stage}/library/corrected_mrr"] = float(
+                np.where(chas, 1.0 / np.maximum(cfirst, 1), 0.0).mean()
+            )
+
         summary = []
         for cut in _KS:
             if cut > k:
@@ -307,6 +357,12 @@ class RGroupLibraryRetrieval(pl.Callback):
             prior = self._vocab.prior_hit_at_k(target_rows, cut)
             metrics[f"{stage}/library/hit@{cut}"] = hit
             metrics[f"{stage}/library/prior_hit@{cut}"] = prior
+            if corrected is not None:
+                chit = float(chits[:, :cut].any(axis=1).mean())
+                metrics[f"{stage}/library/corrected_hit@{cut}"] = chit
+                metrics[f"{stage}/library/corrected_lift@{cut}"] = (
+                    chit / prior if prior > 0 else float("nan")
+                )
             # lift <= 1 means the model adds nothing over "return the most common".
             metrics[f"{stage}/library/lift@{cut}"] = (
                 hit / prior if prior > 0 else float("nan")
