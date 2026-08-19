@@ -569,6 +569,68 @@ mean -- the same discipline as `library/lift@K`. Real learning is on
 
 ---
 
+## 5.7 Seed sweep — does the assembly head help? (5 seeds x 2 arms)
+
+Condvec removed, training-side logQ off, 30 epochs, `coconut-flavordb_full/macfrag`.
+`num_workers` pinned at 12 across every run, and `data_module_kwargs.seed` swept
+alongside `random_seed` so the replicates capture data-sampling variance and not
+just weight init.
+
+| metric | baseline (n=5) | assembly (n=5) | delta | paired t |
+|---|---|---|---|---|
+| corrected hit@1 | 0.5872 +- 0.0149 | 0.5862 +- 0.0164 | -0.0011 | p=0.92 |
+| corrected hit@10 | 0.7441 +- 0.0245 | 0.7408 +- 0.0261 | -0.0033 | |
+| corrected MRR | 0.6456 +- 0.0185 | 0.6437 +- 0.0199 | -0.0019 | p=0.89 |
+| pure hit@1 | 0.1635 +- 0.0328 | 0.1751 +- 0.0400 | +0.0116 | p=0.67 |
+| macro hit@1 | 0.0879 +- 0.0112 | 0.0955 +- 0.0170 | +0.0076 | |
+| val/loss | 5.4620 +- 0.0352 | 5.4999 +- 0.0780 | +0.0379 | |
+
+**The assembly head does not help retrieval.** Nothing clears significance, and
+the per-seed deltas swing both ways (corrected hit@1: +0.008, -0.016, -0.032,
++0.026, +0.008). The single-run +0.0152 reported earlier was noise, exactly as
+the earlier num_workers spread suggested it might be.
+
+It does not *hurt* either, and it recovers joint chemistry at 93-99% of headroom
+(section 5.6), so it remains defensible as the core-decoration objective -- the
+thing that makes a retrieved R-group actually attachable. It is simply not a
+retrieval improvement, and the earlier claim that "all three contrastive losses
+improved" does not replicate: val/loss is marginally *worse* with the head.
+
+### The scoring correction is the result that matters
+
+Baseline, averaged over 5 seeds:
+
+| K | pure similarity | lift | popularity-corrected | lift | prior |
+|---|---|---|---|---|---|
+| 1 | 0.1635 | **0.61x** | **0.5872** | **2.20x** | 0.2668 |
+| 10 | 0.3457 | 0.51x | 0.7441 | 1.10x | 0.6737 |
+| 100 | 0.5793 | 0.71x | 0.8063 | 0.98x | 0.8193 |
+
+Ranked by pure similarity the model sits **below the frequency prior** (0.51-0.71x),
+landing inside MolDAM's measured 0.64-0.80x band on a different corpus. Adding
+`log p` back at scoring takes hit@1 to **2.20x the prior**. This independently
+reproduces MolDAM devlog Phase 9 -> Phase 10: the negative result was a scoring
+artifact, not a model failure.
+
+### Removing the condvec fixed the list collapse
+
+| | with condvec | without |
+|---|---|---|
+| distinct R-groups at rank 1 | 680 | **5,851** |
+| library coverage in any top-10 | 11.4% | **100%** |
+
+An ~8.6x increase in retrieved-list diversity. With the leaked condition the
+model returned a small pool of common R-groups; without it the lists are genuinely
+query-specific.
+
+### What is still not learned
+
+Pure hit@1 by target-frequency bucket: top-10 **0.202**, 10-100 0.126, 100-1k
+0.070, 1k-10k **0.036**. Corrected hit@100 sits at 0.98x -- *at* the prior. The
+head of the distribution is learned; the tail is not.
+
+---
+
 ## 6. Design decisions and their reasons
 
 | Decision | Reason |
