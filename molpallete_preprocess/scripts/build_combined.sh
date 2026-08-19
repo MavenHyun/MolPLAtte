@@ -2,13 +2,13 @@
 # Build the primary MolPallete pretraining corpus: FlavorDB + COCONUT combined.
 #
 # This is the corpus the pretraining runs use. The per-source corpora under
-# flavor_v1/ and coconut_v1/ remain as the source ablation and the decomposition
+# flavordb_full/ and coconut_full/ remain as the source ablation and the decomposition
 # method comparison; note they predate always-on deduplication.
 set -euo pipefail
 
 CORPORA="${CORPORA:-/home/mogan/preprocessed/molpallete}"
 WORKERS="${WORKERS:-88}"
-VERSION="${VERSION:-combined_v1}"
+VERSION="${VERSION:-coconut-flavordb_full}"
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO"
 [ -f "$REPO/preprocess_flavor.py" ] || { echo "ERROR: wrong repo: $REPO" >&2; exit 1; }

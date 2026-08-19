@@ -99,13 +99,13 @@ run shows collapsed retrieval rather than plausible-looking noise.
 # 1. Build a corpus (FlavorDB, ~14 s on 88 workers)
 cd molpallete_preprocess
 python preprocess_flavor.py --source flavordb --method macfrag \
-  --output-path /home/mogan/preprocessed/molpallete/flavor_v1/macfrag --workers 88
+  --output-path /home/mogan/preprocessed/molpallete/flavordb_full/macfrag --workers 88
 
 # ... or build every corpus
 CORPORA=/home/mogan/preprocessed/molpallete ./scripts/build_all_corpora.sh
 
 # 2. Build the R-group library vocabulary (the RGR retrieval target space)
-python enumerate_rgroups.py --corpus /home/mogan/preprocessed/molpallete/flavor_v1/macfrag --workers 88
+python enumerate_rgroups.py --corpus /home/mogan/preprocessed/molpallete/flavordb_full/macfrag --workers 88
 
 # 3. Sanity-check the training loop (~40 s, CPU)
 cd ../molpallete/src
@@ -117,7 +117,7 @@ python run.py --config-name config_debug \
 # 4. Pretrain
 python run.py --config-name config \
   data_module_kwargs.dataset_path=/home/mogan/preprocessed/molpallete \
-  data_module_kwargs.dataset_version=flavor_v1 \
+  data_module_kwargs.dataset_version=flavordb_full \
   data_module_kwargs.decomposition_method=macfrag \
   trainer_kwargs.accelerator=gpu trainer_kwargs.devices=1 \
   trainer_kwargs.precision=bf16-mixed \
@@ -126,7 +126,7 @@ python run.py --config-name config \
 # 5. Export the trained library for lead-optimization queries
 python build_library.py \
   --checkpoint /home/mogan/checkpoints/flavor_macfrag_v1_best.pt \
-  --corpus /home/mogan/preprocessed/molpallete/flavor_v1/macfrag \
+  --corpus /home/mogan/preprocessed/molpallete/flavordb_full/macfrag \
   --config /home/mogan/preprocessed/molpallete/logs/pretrain_v1/.hydra/config.yaml \
   --output /home/mogan/libraries/flavor_macfrag_v1
 ```
@@ -147,7 +147,7 @@ model, `hit@1000 = 0.098` against a prior of `0.947`: a number that looks
 non-trivial in isolation and is in fact far below the baseline. `lift <= 1` means
 the model has learned nothing the prior does not already give you.
 
-25 epochs of pretraining on `flavor_v1/macfrag`, scored over all 5,663 R-groups:
+25 epochs of pretraining on `flavordb_full/macfrag`, scored over all 5,663 R-groups:
 
 | metric | untrained | epoch 7 | epoch 25 | prior | lift |
 |---|---|---|---|---|---|
@@ -156,7 +156,7 @@ the model has learned nothing the prior does not already give you.
 | Hit@10 | 0.005 | 0.675 | **0.847** | 0.650 | **1.30×** |
 | Hit@100 | 0.008 | 0.798 | **0.952** | 0.823 | **1.16×** |
 
-On the **combined corpus** (369,881 molecules, a 60,773-R-group library at
+On the **combined corpus** `coconut-flavordb_full` (369,881 molecules, a 60,773-R-group library at
 effective size 34 — the same scale as MolPLA's 61,279 on GEOM), 30 epochs:
 
 | metric | epoch 1 | epoch 30 | prior | lift |
@@ -178,13 +178,13 @@ one's 5,663, so a higher MRR here reflects an easier library, not a better model
 
 | corpus | records | dec/mol | R-groups/dec | size |
 |---|---|---|---|---|
-| `flavor_v1/macfrag` *(default)* | 20,428 | 7.27 | 2.69 | 242 MB |
-| `flavor_v1/naveja_recap` | 23,216 | 8.76 | 1.07 | 231 MB |
-| `flavor_v1/bemis_murcko` | 19,121 | 1.00 | 5.17 | 166 MB |
-| `flavor_v1/synton` | 12,084 | 2.52 | 1.12 | 111 MB |
+| `flavordb_full/macfrag` *(default)* | 20,428 | 7.27 | 2.69 | 242 MB |
+| `flavordb_full/naveja_recap` | 23,216 | 8.76 | 1.07 | 231 MB |
+| `flavordb_full/bemis_murcko` | 19,121 | 1.00 | 5.17 | 166 MB |
+| `flavordb_full/synton` | 12,084 | 2.52 | 1.12 | 111 MB |
 
-| **`combined_v1/macfrag`** *(primary)* | **369,881** | **7.57** | **3.12** | 4.3 GB |
-| `coconut_v1/macfrag` | 354,515 | 7.56 | 3.13 | 4.1 GB |
+| **`coconut-flavordb_full/macfrag`** *(primary)* | **369,881** | **7.57** | **3.12** | 4.3 GB |
+| `coconut_full/macfrag` | 354,515 | 7.56 | 3.13 | 4.1 GB |
 
 `synton` retained 48.3% of molecules, matching its measured 50.2% no-partition
 rate on flavor chemistry (it is also ~30× slower than every other method).

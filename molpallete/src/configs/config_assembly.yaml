@@ -9,7 +9,7 @@
 #
 #   python run.py --config-name config_assembly \
 #     data_module_kwargs.dataset_path=/home/mogan/preprocessed/molpallete \
-#     data_module_kwargs.dataset_version=combined_v2
+#     data_module_kwargs.dataset_version=coconut-flavordb_full
 defaults:
   - config
   - _self_

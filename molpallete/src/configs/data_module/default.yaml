@@ -7,7 +7,7 @@
 data_module: MolPalleteDataModule
 data_module_kwargs:
   dataset_path:           null
-  dataset_version:        flavor_v1
+  dataset_version:        coconut-flavordb_full
   # macfrag, not naveja_recap. MolPLA's formulation needs k >= 2 R-groups for
   # the `islinked` bitmask and the core-decoration objective to be
   # non-degenerate, and naveja_recap with a ratio threshold cannot produce

@@ -153,6 +153,29 @@ Source: `/home/mogan/github/MolDAM`, `/home/mogan/github/MolDAM_prep`.
 
 ---
 
+## 3.2 Corpus naming
+
+`{sources}_{scale}`, sources joined by `-` in the order they are read. Mirrors
+MolDAM's `{scale}` slot convention (`zinc_1pct`), so a subsampled build would be
+`coconut-flavordb_1pct`.
+
+| corpus | sources | records | note |
+|---|---|---|---|
+| `coconut-flavordb_full` | both | 369,881 | **canonical** — hash v2 |
+| `coconut-flavordb_full_hashv1` | both | 369,881 | superseded; kept only for the §5 hash comparison |
+| `coconut_full` | COCONUT | 354,515 | source ablation |
+| `flavordb_full` | FlavorDB | 20,428 | source ablation |
+
+Each holds one sub-directory per decomposition method (`macfrag`,
+`naveja_recap`, `bemis_murcko`, `synton`). `_full` means no subsampling; the
+heavy-atom filter `[5, 50]` and COCONUT variant deduplication still apply and are
+recorded in each corpus's provenance block.
+
+The two per-source corpora predate always-on deduplication, so they are not
+directly comparable to the combined ones on record counts.
+
+---
+
 ## 4. Repo layout
 
 ```
@@ -224,10 +247,10 @@ FlavorDB: 25,595 compounds, 23,379 after the `[5, 50]` heavy-atom filter.
 
 | corpus | records | dec/mol | R-groups/dec | size |
 |---|---|---|---|---|
-| `flavor_v1/macfrag` | 20,428 | 7.27 | **2.69** | 242 MB |
-| `flavor_v1/naveja_recap` | 23,216 | 8.76 | **1.07** | 231 MB |
-| `flavor_v1/bemis_murcko` | 19,121 | 1.00 | 5.17 | 166 MB |
-| `flavor_v1/synton` | 12,084 | 2.52 | 1.12 | 111 MB |
+| `flavordb_full/macfrag` | 20,428 | 7.27 | **2.69** | 242 MB |
+| `flavordb_full/naveja_recap` | 23,216 | 8.76 | **1.07** | 231 MB |
+| `flavordb_full/bemis_murcko` | 19,121 | 1.00 | 5.17 | 166 MB |
+| `flavordb_full/synton` | 12,084 | 2.52 | 1.12 | 111 MB |
 
 The corpus-scale `naveja_recap` number (1.07 R-groups/decomposition over all
 23,216 records) confirms the 400-molecule probe. `synton` retained only 48.3% of
@@ -238,7 +261,7 @@ deduplication, 396,936 after the heavy-atom filter.
 
 | corpus | records | dec/mol | R-groups/dec | size |
 |---|---|---|---|---|
-| `coconut_v1/macfrag` | 354,515 | 7.56 | **3.13** | 4.1 GB |
+| `coconut_full/macfrag` | 354,515 | 7.56 | **3.13** | 4.1 GB |
 
 Natural products are larger and more decorated than flavor volatiles, so they give
 *more* multi-R-group structure than FlavorDB (3.13 vs 2.69 R-groups per
@@ -247,7 +270,7 @@ was 2,620 mol/s on 88 workers; `no_decomp` was 10.7%.
 
 ### 5.4 Integration validation
 
-A 16-molecule batch off `flavor_v1/macfrag` through the full stack:
+A 16-molecule batch off `flavordb_full/macfrag` through the full stack:
 
 ```
 W               : 64 graphs / 918 nodes   (16 G + 16 P + 32 R)
@@ -297,7 +320,7 @@ on it keeps one identity notion throughout.
 
 | corpus | distinct R-groups | occurrences | **effective size** | top-1 share |
 |---|---|---|---|---|
-| `flavor_v1/macfrag` | 5,663 | 399,141 | **31** | 19.31% |
+| `flavordb_full/macfrag` | 5,663 | 399,141 | **31** | 19.31% |
 
 The most frequent entries are chemically sensible: `*O`, `*CO`, `*C`,
 `*c1ccccc1`, `*c1ccc(O)c(O)c1` (catechol), and glycoside sugars — the last
@@ -336,7 +359,7 @@ Both retrieval evaluations are logged, under distinct prefixes so they cannot be
 confused: `{stage}/faiss/*` is the cheap val-split gallery, `{stage}/library/*`
 is the full corpus library.
 
-### Does it learn? — 25 epochs on `flavor_v1/macfrag`
+### Does it learn? — 25 epochs on `flavordb_full/macfrag`
 
 Full-library retrieval over all 5,663 R-groups, ~1,450 validation queries per
 epoch, batch 512, bf16, one GPU:
@@ -387,7 +410,7 @@ first pass.
 
 ### Combined corpus — the primary run
 
-`combined_v1/macfrag`: 369,881 molecules (351,382 COCONUT + 18,499 FlavorDB,
+`coconut-flavordb_full/macfrag`: 369,881 molecules (351,382 COCONUT + 18,499 FlavorDB,
 5,062 duplicates removed), 332,893 train / 18,494 val / 18,494 test.
 5.4M parameters, 30 epochs, batch 512, bf16, one GPU. Library: **60,773 distinct
 R-groups**, effective size 34, top-1 share 31.08% — essentially the same scale as
@@ -415,7 +438,9 @@ Queries are subsampled to 20,000 of ~30,000 per epoch with a fixed seed
 ### Hash v1 vs v2 — what the fix was actually worth
 
 Identical settings, identical corpus content; the only difference is the WL hash
-(see §6). 30 epochs, `combined_*/macfrag`.
+(see §6). 30 epochs, macfrag. The two corpora are
+`coconut-flavordb_full_hashv1` (superseded, kept for this comparison) and
+`coconut-flavordb_full` (canonical).
 
 | | library | MRR | Hit@1 | lift | Hit@10 | lift | Hit@100 | lift |
 |---|---|---|---|---|---|---|---|---|

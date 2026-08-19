@@ -30,8 +30,8 @@ Example
 ::
 
     python enumerate_rgroups.py \\
-      --corpus /home/mogan/preprocessed/molpallete/flavor_v1/macfrag \\
-      --output /home/mogan/preprocessed/molpallete/flavor_v1/macfrag/rgroup_vocab.pkl.gz \\
+      --corpus /home/mogan/preprocessed/molpallete/flavordb_full/macfrag \\
+      --output /home/mogan/preprocessed/molpallete/flavordb_full/macfrag/rgroup_vocab.pkl.gz \\
       --workers 88
 """
 

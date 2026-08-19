@@ -26,16 +26,16 @@ build () {
 }
 
 # FlavorDB -- 25,595 compounds, the in-domain set.
-build flavordb macfrag      flavor_v1
-build flavordb naveja_recap flavor_v1
-build flavordb bemis_murcko flavor_v1
-build flavordb synton       flavor_v1
+build flavordb macfrag      flavordb_full
+build flavordb naveja_recap flavordb_full
+build flavordb bemis_murcko flavordb_full
+build flavordb synton       flavordb_full
 
 # COCONUT -- 737,343 records collapsing to 489,395 distinct compounds.
-build coconut macfrag      coconut_v1
-build coconut naveja_recap coconut_v1
-build coconut bemis_murcko coconut_v1
-build coconut synton       coconut_v1
+build coconut macfrag      coconut_full
+build coconut naveja_recap coconut_full
+build coconut bemis_murcko coconut_full
+build coconut synton       coconut_full
 
 echo "== ALL CORPORA BUILT"
 du -sh "$CORPORA"/*/* 2>/dev/null || true

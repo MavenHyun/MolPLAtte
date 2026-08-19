@@ -16,7 +16,7 @@
 # ---------------------------------------------------------------------------
 set -euo pipefail
 
-EXP="${EXP:-molpallete_flavor_v1_macfrag_first_run}"
+EXP="${EXP:-molpallete_flavordb_full_macfrag_first_run}"
 REPO="${REPO:-/home/mogan/github/MolPallete/molpallete}"
 LOGDIR="${LOGDIR:-/home/mogan/logs/molpallete}"
 CONFIG="${CONFIG:-config}"

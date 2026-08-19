@@ -219,7 +219,7 @@ class DataModuleConfig:
     """
 
     dataset_path: Optional[Path] = None
-    dataset_version: str = "flavor_v1"
+    dataset_version: str = "coconut-flavordb_full"
     decomposition_method: str = "macfrag"
     batch_size: int = 512
     num_workers: int = 8

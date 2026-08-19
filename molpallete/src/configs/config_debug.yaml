@@ -23,7 +23,7 @@ random_seed: 0
 debug_mode: false
 
 data_module_kwargs:
-  dataset_version:        flavor_v1
+  dataset_version:        flavordb_full
   decomposition_method:   macfrag
   batch_size:             8
   num_workers:            0
