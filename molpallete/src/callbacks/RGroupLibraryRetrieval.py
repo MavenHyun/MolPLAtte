@@ -244,6 +244,7 @@ class RGroupLibraryRetrieval(pl.Callback):
             return
 
         stage = "test" if trainer.testing else "val"
+
         hits = retrieved == target_rows[:, None]
         # Rank of the true R-group; queries that miss the top-K score 0 reciprocal.
         has_hit = hits.any(axis=1)
@@ -258,6 +259,46 @@ class RGroupLibraryRetrieval(pl.Callback):
             f"{stage}/library/n_target_missing": float(n_missing),
             f"{stage}/library/queries_truncated": float(truncated),
         }
+        # ---- long-tail diagnostics ------------------------------------------
+        # hit@K is a MICRO average, and this task's target distribution is
+        # savagely long-tailed: 52.6% of true targets are among the 10 most
+        # frequent R-groups. So a headline hit@1 is dominated by an easy majority
+        # class and can look strong while the model has learned little beyond the
+        # prior. Measured on the v2 checkpoint: micro hit@1 0.712 against a MACRO
+        # (frequency-bucket-balanced) 0.472, and accuracy falling 0.924 -> 0.130
+        # from the head bucket to the tail.
+        #
+        # Two further symptoms, both logged:
+        #   rank1_distinct  how many different R-groups ever appear at rank 1.
+        #                   Measured 680 out of a 48,671-row library; for queries
+        #                   whose condition vector is all-zero it collapses to 41.
+        #   coverage        fraction of the library ever appearing in any top-K
+        #                   (measured 11.4%).
+        counts = getattr(self._vocab, "counts", None)
+        if counts is not None and len(counts):
+            order = np.argsort(-counts)
+            freq_pos = np.empty(len(counts), dtype=np.int64)
+            freq_pos[order] = np.arange(len(counts))
+            tpos = freq_pos[target_rows]
+            top1 = retrieved[:, 0] == target_rows
+            bucket_acc = []
+            for lo, hi, lab in ((0, 10, "0_10"), (10, 100, "10_100"),
+                                (100, 1000, "100_1k"), (1000, 10000, "1k_10k"),
+                                (10000, 1 << 30, "10k_plus")):
+                sel = (tpos >= lo) & (tpos < hi)
+                if sel.sum() == 0:
+                    continue
+                acc = float(top1[sel].mean())
+                metrics[f"{stage}/library/hit@1/freq_{lab}"] = acc
+                bucket_acc.append(acc)
+            if bucket_acc:
+                # Unweighted over buckets: the number that does NOT let the
+                # frequent head carry the score.
+                metrics[f"{stage}/library/macro_hit@1"] = float(np.mean(bucket_acc))
+            metrics[f"{stage}/library/rank1_distinct"] = float(len(set(retrieved[:, 0].tolist())))
+            metrics[f"{stage}/library/coverage"] = float(
+                len(set(retrieved.flatten().tolist())) / max(library.shape[0], 1)
+            )
         summary = []
         for cut in _KS:
             if cut > k:
