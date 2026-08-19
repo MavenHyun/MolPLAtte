@@ -51,3 +51,40 @@ nnet_module_kwargs:
     hidden_dim:              null
     dropout_rate:            null
     norm_method:             null
+
+  # ---------------------------------------------------------------------------
+  # Assembly head (core decoration).  OFF by default: `null` keeps the three
+  # MolPLA objectives as the baseline.  Set to `AssemblyHead` to enable.
+  #
+  # What it does: retrieval says WHICH R-group belongs at a joint; the joint
+  # itself is masked, so the shared linker atom's identity and the bond that
+  # forms are unknown and the R-group cannot actually be attached.  This head
+  # predicts them back.
+  #
+  # Requires `data_module_kwargs.need_assembly_targets: true` -- the targets are
+  # derived at sampling time from the intact graph, so no corpus rebuild.
+  # ---------------------------------------------------------------------------
+  assembly_head:             null      # null | AssemblyHead
+  assembly_head_kwargs:
+    hidden_dim:              null
+    dropout_rate:            null
+    norm_method:             null
+    # Which pre-mask attributes to recover. Defaults (null) are the minimal set
+    # needed to attach an R-group: atom identity + bond type.
+    #   node: atomic_num, formal_charge, chirality_specified, hybridization,
+    #         num_explicit_hs, is_aromatic
+    #   edge: bond_type, edge_is_aromatic, is_conjugated, bond_stereo
+    # chiral_tag and bond_dir are deliberately unavailable -- the first is
+    # order-dependent at a joint whose neighbour order changed by construction,
+    # the second encodes how E/Z was WRITTEN. See data_modules/assembly_targets.py
+    node_attrs:              null
+    edge_attrs:              null
+    # How to combine the joint's two masked views (P-side and R-side).
+    #   concat -> learned projection over both (default)
+    #   mean   -> MolDAM's 0.5*(core+rgroup); its own docs flag this as halving
+    #             signal for asymmetric joints
+    #   gate   -> learned per-dimension convex mix
+    fusion:                  concat
+    # Joint coupling InfoNCE. OFF: linker_contrastive already couples joints in
+    # MolPLA's formulation. Enable only to ablate the two against each other.
+    coupling:                false

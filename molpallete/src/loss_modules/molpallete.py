@@ -24,6 +24,7 @@ from typing import Dict, Optional
 
 import torch
 
+from .assembly import AssemblyLoss
 from .base import LossModule
 from .contrastive import DualInfoNCE, group_ids_from_keys
 
@@ -37,6 +38,7 @@ class LossModuleMolPallete(LossModule):
         loss_graph_kwargs: Optional[dict] = None,
         loss_linker_kwargs: Optional[dict] = None,
         loss_rgroup_kwargs: Optional[dict] = None,
+        loss_assembly_kwargs: Optional[dict] = None,
         **kwargs,
     ) -> None:
         super().__init__(model, **kwargs)
@@ -46,6 +48,11 @@ class LossModuleMolPallete(LossModule):
                 "linker_contrastive": DualInfoNCE(**(loss_linker_kwargs or {})),
                 "rgroup_contrastive": DualInfoNCE(**(loss_rgroup_kwargs or {})),
             }
+        )
+        # Present only when configured, so a run without the head logs three
+        # loss terms rather than a fourth that is silently zero.
+        self.assembly = (
+            AssemblyLoss(**loss_assembly_kwargs) if loss_assembly_kwargs else None
         )
 
     def _compute_losses(self, batch: Dict) -> Dict:
@@ -62,6 +69,8 @@ class LossModuleMolPallete(LossModule):
         batch["loss/rgroup_contrastive"] = self.loss["rgroup_contrastive"](
             *batch["rgroup_contrastive"], keys
         )
+        if self.assembly is not None:
+            batch["loss/assembly"] = self.assembly(batch)
         return batch
 
     @torch.no_grad()
@@ -101,4 +110,6 @@ class LossModuleMolPallete(LossModule):
             (same.sum(dim=1) > 1).float().mean()
         )
         metrics["retrieval/n_queries"] = torch.tensor(float(n), device=sim.device)
+        if self.assembly is not None:
+            metrics.update(self.assembly.eval_metrics(batch))
         return metrics

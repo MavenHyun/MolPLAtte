@@ -36,3 +36,6 @@ data_module_kwargs:
   # Cap on detached R-groups per instance, i.e. rows contributed to the
   # per-linker retrieval loss.
   max_rgroups:            8
+  # Derive pre-mask joint chemistry for the assembly head. Costs a little CPU
+  # per __getitem__ and nothing on disk. Must be true when the head is enabled.
+  need_assembly_targets:     false

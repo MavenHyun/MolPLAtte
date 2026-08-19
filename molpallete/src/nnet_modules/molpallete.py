@@ -45,6 +45,7 @@ from torch import nn
 from torch_geometric.nn import global_add_pool, global_mean_pool
 
 from . import encoders as encoder_registry
+from . import heads as head_registry
 from .heads import projectors as projector_registry
 
 __all__ = ["MolPalleteConfig", "MolPallete"]
@@ -84,6 +85,12 @@ class MolPalleteConfig:
     rgroup_projector: str = "MLPProjector"
     rgroup_projector_kwargs: dict = field(default_factory=dict)
 
+    #: Assembly head -- recovers the chemistry masking destroyed at each joint,
+    #: which is what turns "retrieve this R-group" into "attach it like this".
+    #: Off by default so the three MolPLA objectives stay the baseline.
+    assembly_head: Optional[str] = None
+    assembly_head_kwargs: dict = field(default_factory=dict)
+
     def __post_init__(self) -> None:
         shared = {
             "hidden_dim": self.hidden_dim,
@@ -96,6 +103,7 @@ class MolPalleteConfig:
             "node_projector_kwargs",
             "query_projector_kwargs",
             "rgroup_projector_kwargs",
+            "assembly_head_kwargs",
         ):
             head_kwargs = dict(getattr(self, name) or {})
             for key, value in shared.items():
@@ -140,6 +148,10 @@ class MolPallete(nn.Module):
         self.nnet["rgroup_projector"] = getattr(projector_registry, c.rgroup_projector)(
             **c.rgroup_projector_kwargs
         )
+        if c.assembly_head:
+            self.nnet["assembly_head"] = getattr(head_registry, c.assembly_head)(
+                **c.assembly_head_kwargs
+            )
         self.pool = _POOLING[c.graph_pooling]
 
     @staticmethod
@@ -210,6 +222,12 @@ class MolPallete(nn.Module):
             R_nodes, batch["R_pool_index"], size=max(n_rgroups, 1)
         )[:n_rgroups]
         z_R = self.nnet["rgroup_projector"](rgroup_pooled)
+
+        # Assembly runs last: it reads the same joint indices as loss 2 and
+        # writes only prediction logits, so it cannot perturb the contrastive
+        # branches.
+        if "assembly_head" in self.nnet:
+            batch = self.nnet["assembly_head"](batch)
 
         if z_C.shape[0] != z_R.shape[0]:
             raise ValueError(

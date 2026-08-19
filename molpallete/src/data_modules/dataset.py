@@ -57,6 +57,10 @@ class MolPalleteSample:
     #: Parent-molecule atom index of each shared linker atom.  ``G`` is the
     #: parent molecule, so these index straight into ``G``.
     joint_G_atoms: Sequence[int]
+    #: ``linker_id -> {atom_features, cut_bond_features, incident_features}``,
+    #: the pre-mask chemistry at each joint. Empty unless the assembly head is
+    #: enabled; it is derived at build time, so it costs nothing on disk.
+    joint_metas: Dict[int, dict]
     islinked: Sequence[bool]
     mol_id: str
     instance_id: str
@@ -84,6 +88,7 @@ class MolPalleteDataset(Dataset):
         condvec_dim: int = 97,
         max_rgroups: int = 8,
         seed: Optional[int] = None,
+        need_assembly_targets: bool = False,
     ) -> None:
         self.root = Path(dataset_path)
         meta_path = self.root / "__meta__.json"
@@ -105,6 +110,7 @@ class MolPalleteDataset(Dataset):
         self.method: str = meta.get("method", "unknown")
         self.condvec_dim = condvec_dim
         self.max_rgroups = max_rgroups
+        self.need_assembly_targets = need_assembly_targets
         self.ids: List[str] = list(meta["ids"])
         self._rng = random.Random(seed)
 
@@ -163,7 +169,7 @@ class MolPalleteDataset(Dataset):
                 decomposition,
                 islinked,
                 mol_id=record["mol_id"],
-                store_orig=False,
+                store_orig=self.need_assembly_targets,
                 compute_hashes=False,
             )
         except Exception:
@@ -181,6 +187,7 @@ class MolPalleteDataset(Dataset):
             R_hashes=hashes,
             joint_linker_ids=instance.joint_linker_ids,
             joint_G_atoms=instance.joint_G_atoms,
+            joint_metas=getattr(instance.P, "linker_metas", {}) or {},
             islinked=instance.islinked,
             mol_id=record["mol_id"],
             instance_id=instance.instance_id,

@@ -60,6 +60,11 @@ import pytorch_lightning as pl
 from torch.utils.data import DataLoader, random_split
 from torch_geometric.data import Batch
 
+from .assembly_targets import (
+    RECOVERABLE_EDGE_ATTRS,
+    RECOVERABLE_NODE_ATTRS,
+    derive_node_target,
+)
 from .dataset import MolPalleteDataset, MolPalleteSample
 
 __all__ = ["collate_molpallete", "DataModuleConfig", "MolPalleteDataModule"]
@@ -115,6 +120,11 @@ def collate_molpallete(batch: List[MolPalleteSample]) -> dict:
 
     joint_G, joint_P, joint_R, joint_sample, joint_rgroup = [], [], [], [], []
     condvecs, hashes = [], []
+    # Pre-mask chemistry at each joint: the assembly head's targets. Populated
+    # only when the dataset was asked for them, so a run without the head pays
+    # nothing here.
+    node_targets = {a: [] for a in RECOVERABLE_NODE_ATTRS}
+    edge_targets = {a: [] for a in RECOVERABLE_EDGE_ATTRS}
 
     for i, sample in enumerate(batch):
         p_graph = p_graph_offset + i
@@ -131,6 +141,15 @@ def collate_molpallete(batch: List[MolPalleteSample]) -> dict:
                 # detach produced something unpairable. Drop the joint rather than
                 # emit an index that silently points at the wrong atom.
                 continue
+
+            meta = sample.joint_metas.get(linker_id) if sample.joint_metas else None
+            if meta is not None:
+                atom_feats = meta.get("atom_features", {})
+                bond_feats = meta.get("cut_bond_features", {})
+                for attr in RECOVERABLE_NODE_ATTRS:
+                    node_targets[attr].append(derive_node_target(attr, atom_feats))
+                for attr in RECOVERABLE_EDGE_ATTRS:
+                    edge_targets[attr].append(int(bond_feats.get(attr, 0)))
 
             joint_G.append(int(ptr[i]) + int(sample.joint_G_atoms[j]))
             joint_P.append(int(ptr[p_graph]) + p_atom)
@@ -167,6 +186,18 @@ def collate_molpallete(batch: List[MolPalleteSample]) -> dict:
             else torch.zeros(0, batch[0].condvec.shape[-1] if batch else 0)
         ),
         "num_joints": len(joint_G),
+        # Emitted only if every joint had metas -- a partially populated target
+        # would silently train on whichever joints happened to carry them.
+        "joint_atom_target": (
+            {a: long(v) for a, v in node_targets.items()}
+            if node_targets["atomic_num"] and len(node_targets["atomic_num"]) == len(joint_G)
+            else {}
+        ),
+        "joint_bond_target": (
+            {a: long(v) for a, v in edge_targets.items()}
+            if edge_targets["bond_type"] and len(edge_targets["bond_type"]) == len(joint_G)
+            else {}
+        ),
         "R_hashes": hashes,
         "num_samples": len(batch),
         "mol_ids": [s.mol_id for s in batch],
@@ -201,6 +232,9 @@ class DataModuleConfig:
     condvec_mode: str = "neutral"
     condvec_dim: int = 97
     max_rgroups: int = 8
+    #: Derive pre-mask joint chemistry for the assembly head. Costs a little
+    #: CPU per __getitem__ and nothing on disk; off unless the head is enabled.
+    need_assembly_targets: bool = False
 
     def __post_init__(self) -> None:
         if self.dataset_path is None:
@@ -229,6 +263,7 @@ class MolPalleteDataModule(pl.LightningDataModule):
             condvec_dim=self.config.condvec_dim,
             max_rgroups=self.config.max_rgroups,
             seed=self.config.seed,
+            need_assembly_targets=self.config.need_assembly_targets,
         )
         n_total = len(dataset)
         n_val = int(n_total * self.config.val_split)

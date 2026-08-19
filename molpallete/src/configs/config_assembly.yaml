@@ -1,0 +1,47 @@
+# @package _global_
+#
+# MolPallete + core decoration.
+#
+# Composes on `config` and turns on the assembly head: the three MolPLA
+# contrastive objectives plus recovery of the chemistry masking destroyed at
+# each linker joint. This is the configuration that makes lead optimization
+# end-to-end -- retrieval picks the R-group, recovery says how to bond it on.
+#
+#   python run.py --config-name config_assembly \
+#     data_module_kwargs.dataset_path=/home/mogan/corpora/molpallete \
+#     data_module_kwargs.dataset_version=combined_v2
+defaults:
+  - config
+  - _self_
+
+experiment_name: combined_macfrag_assembly
+
+data_module_kwargs:
+  need_assembly_targets: true
+
+nnet_module_kwargs:
+  assembly_head: AssemblyHead
+  assembly_head_kwargs:
+    # Wider than the default minimal set: hybridization and aromaticity matter
+    # for whether the reformed bond is chemically sane.
+    node_attrs: [atomic_num, formal_charge, num_explicit_hs, hybridization, is_aromatic]
+    edge_attrs: [bond_type, edge_is_aromatic, is_conjugated, bond_stereo]
+    fusion: concat
+    coupling: false
+
+loss_module_kwargs:
+  loss_assembly_kwargs:
+    recovery_weight: 1.0
+    coupling_weight: 0.0
+    temperature: 0.1
+
+lightning_module_kwargs:
+  # The assembly term joins the three contrastive ones. Weighted below 1.0
+  # because MolPLA's own stated limitation is "adversarial optimization
+  # trajectories incurred by three different loss objectives" -- a fourth at
+  # full weight is the obvious way to make that worse. Sweep this.
+  loss_weights:
+    graph_contrastive:  1.0
+    linker_contrastive: 0.1
+    rgroup_contrastive: 1.0
+    assembly:           0.5

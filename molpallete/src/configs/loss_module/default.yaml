@@ -32,3 +32,12 @@ loss_module_kwargs:
     # duplicates as negatives -- otherwise the loss is actively penalised for
     # being right.
     multi_positive:          true
+
+  # Assembly loss. Omit (or leave null) to disable -- the loss term is only
+  # created when this block is present, so a run without the head logs three
+  # loss terms rather than a fourth that is silently zero.
+  loss_assembly_kwargs:      null
+  #  recovery_weight:  1.0   # mean over per-attribute CE, not sum: MolDAM's
+  #                          # original sum let recovery outweigh coupling ~13x
+  #  coupling_weight:  0.0   # only used if assembly_head_kwargs.coupling: true
+  #  temperature:      0.1
