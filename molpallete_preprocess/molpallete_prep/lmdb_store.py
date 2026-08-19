@@ -1,4 +1,4 @@
-"""LMDB-backed store for preprocessed MolDAM corpus.
+"""LMDB-backed store for preprocessed MolPallete corpus.
 
 Layout
 ------

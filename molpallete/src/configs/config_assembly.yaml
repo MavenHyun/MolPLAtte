@@ -8,7 +8,7 @@
 # end-to-end -- retrieval picks the R-group, recovery says how to bond it on.
 #
 #   python run.py --config-name config_assembly \
-#     data_module_kwargs.dataset_path=/home/mogan/corpora/molpallete \
+#     data_module_kwargs.dataset_path=/home/mogan/preprocessed/molpallete \
 #     data_module_kwargs.dataset_version=combined_v2
 defaults:
   - config

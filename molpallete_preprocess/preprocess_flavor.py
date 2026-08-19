@@ -39,14 +39,14 @@ Build the flavor corpus (small, fast -- validate the pipeline here first)::
 
     python preprocess_flavor.py \\
       --source flavordb --method macfrag \\
-      --output-path /home/mogan/corpora/molpallete/flavor_v1/macfrag \\
+      --output-path /home/mogan/preprocessed/molpallete/flavor_v1/macfrag \\
       --workers 32 --progress-every 2000
 
 Build the natural-product corpus::
 
     python preprocess_flavor.py \\
       --source coconut --method macfrag \\
-      --output-path /home/mogan/corpora/molpallete/coconut_v1/macfrag \\
+      --output-path /home/mogan/preprocessed/molpallete/coconut_v1/macfrag \\
       --max-heavy-atoms 50 --workers 88 --layout hash3 --progress-every 25000
 
 Re-running against a populated directory is refused unless ``--resume`` (skip

@@ -6,7 +6,7 @@
 # method comparison; note they predate always-on deduplication.
 set -euo pipefail
 
-CORPORA="${CORPORA:-/home/mogan/corpora/molpallete}"
+CORPORA="${CORPORA:-/home/mogan/preprocessed/molpallete}"
 WORKERS="${WORKERS:-88}"
 VERSION="${VERSION:-combined_v1}"
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

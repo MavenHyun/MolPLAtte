@@ -7,7 +7,7 @@
 # the comparison the brief asks for.  See README.md for the measured table.
 set -euo pipefail
 
-CORPORA="${CORPORA:-/home/mogan/corpora/molpallete}"
+CORPORA="${CORPORA:-/home/mogan/preprocessed/molpallete}"
 WORKERS="${WORKERS:-88}"
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO"

@@ -99,24 +99,24 @@ run shows collapsed retrieval rather than plausible-looking noise.
 # 1. Build a corpus (FlavorDB, ~14 s on 88 workers)
 cd molpallete_preprocess
 python preprocess_flavor.py --source flavordb --method macfrag \
-  --output-path /home/mogan/corpora/molpallete/flavor_v1/macfrag --workers 88
+  --output-path /home/mogan/preprocessed/molpallete/flavor_v1/macfrag --workers 88
 
 # ... or build every corpus
-CORPORA=/home/mogan/corpora/molpallete ./scripts/build_all_corpora.sh
+CORPORA=/home/mogan/preprocessed/molpallete ./scripts/build_all_corpora.sh
 
 # 2. Build the R-group library vocabulary (the RGR retrieval target space)
-python enumerate_rgroups.py --corpus /home/mogan/corpora/molpallete/flavor_v1/macfrag --workers 88
+python enumerate_rgroups.py --corpus /home/mogan/preprocessed/molpallete/flavor_v1/macfrag --workers 88
 
 # 3. Sanity-check the training loop (~40 s, CPU)
 cd ../molpallete/src
 python run.py --config-name config_debug \
   trainer_kwargs.fast_dev_run=1 trainer_kwargs.accelerator=cpu \
-  data_module_kwargs.dataset_path=/home/mogan/corpora/molpallete \
+  data_module_kwargs.dataset_path=/home/mogan/preprocessed/molpallete \
   data_module_kwargs.num_workers=0 data_module_kwargs.persistent_workers=false
 
 # 4. Pretrain
 python run.py --config-name config \
-  data_module_kwargs.dataset_path=/home/mogan/corpora/molpallete \
+  data_module_kwargs.dataset_path=/home/mogan/preprocessed/molpallete \
   data_module_kwargs.dataset_version=flavor_v1 \
   data_module_kwargs.decomposition_method=macfrag \
   trainer_kwargs.accelerator=gpu trainer_kwargs.devices=1 \
@@ -126,8 +126,8 @@ python run.py --config-name config \
 # 5. Export the trained library for lead-optimization queries
 python build_library.py \
   --checkpoint /home/mogan/checkpoints/flavor_macfrag_v1_best.pt \
-  --corpus /home/mogan/corpora/molpallete/flavor_v1/macfrag \
-  --config /home/mogan/corpora/molpallete/logs/pretrain_v1/.hydra/config.yaml \
+  --corpus /home/mogan/preprocessed/molpallete/flavor_v1/macfrag \
+  --config /home/mogan/preprocessed/molpallete/logs/pretrain_v1/.hydra/config.yaml \
   --output /home/mogan/libraries/flavor_macfrag_v1
 ```
 

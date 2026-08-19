@@ -23,7 +23,7 @@ Example
 
     python build_library.py \\
       --checkpoint /home/mogan/checkpoints/flavor_macfrag_v1_best.pt \\
-      --corpus /home/mogan/corpora/molpallete/flavor_v1/macfrag \\
+      --corpus /home/mogan/preprocessed/molpallete/flavor_v1/macfrag \\
       --output /home/mogan/libraries/flavor_macfrag_v1
 
 Querying it afterwards::
