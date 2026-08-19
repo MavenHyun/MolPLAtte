@@ -46,7 +46,10 @@ def get_init_config(config: DictConfig) -> DictConfig:
     _apply_assembly_switch(config)
 
     base_path = Path(config.master_path)
-    ckpt_path = base_path / "checkpoints"
+    # Namespaced under the project, matching preprocessed/molpallete. The flat
+    # ~/checkpoints was shared with MolDAM (debug_anchored_best.pt lives there),
+    # so an unprefixed experiment_name could have collided across projects.
+    ckpt_path = base_path / "checkpoints" / "molpallete"
     ckpt_path.mkdir(parents=True, exist_ok=True)
 
     return config, base_path, ckpt_path

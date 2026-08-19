@@ -68,3 +68,11 @@ assembly:
     recovery_weight: 1.0
     coupling_weight: 0.0
     temperature:     0.1
+
+# Run outputs (.hydra/, run.log, prediction_tables/) land beside the checkpoints
+# rather than in Hydra's default outputs/YYYY-MM-DD/HH-MM-SS under cwd, so a
+# run's artefacts are all in one place and named after the experiment.
+# Override with `hydra.run.dir=...` as usual.
+hydra:
+  run:
+    dir: ${master_path}/checkpoints/molpallete/outputs/${experiment_name}
