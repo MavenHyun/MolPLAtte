@@ -87,12 +87,20 @@ def get_logger(config: DictConfig, ckpt_path: Path) -> Optional[pl.loggers.Logge
     wcfg = config.get("wandb") or {}
     if not wcfg or wcfg.get("project") is None:
         return None
-    return pl.loggers.WandbLogger(
+    logger = pl.loggers.WandbLogger(
         project=wcfg.get("project"),
         name=wcfg.get("name"),
         save_dir=wcfg.get("save_dir") or str(ckpt_path),
         log_model=wcfg.get("log_model", False),
     )
+    # Log the resolved Hydra config as hyperparameters. Without this wandb
+    # records ZERO config keys -- the run page shows metrics with no record of
+    # what produced them, so runs cannot be compared or reproduced from the UI.
+    # api.* is stripped: it carries the resolved WANDB_API_KEY and HF_TOKEN.
+    resolved = OmegaConf.to_container(config, resolve=True)
+    resolved.pop("api", None)
+    logger.log_hyperparams(resolved)
+    return logger
 
 
 def _retrieval_loss_kwargs(config: DictConfig) -> dict:
