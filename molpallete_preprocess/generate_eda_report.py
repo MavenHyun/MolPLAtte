@@ -34,11 +34,70 @@ from rdkit import Chem, RDLogger
 
 RDLogger.DisableLog("rdApp.*")
 
+from rdkit.Chem import Draw
+from rdkit.Chem.Draw import rdMolDraw2D
+
 from molpallete_prep.lmdb_store import hydrate
 from molpallete_prep.preprocess import path_for
 from molpallete_prep.rgroup_library import load_vocabulary
 
 PAGE = (8.5, 11)
+
+#: core / R-group highlight colours (RGB 0-1), colour-blind safe.
+_CORE_RGB = (0.30, 0.45, 0.69)
+_RG_RGB = (0.87, 0.52, 0.32)
+
+
+def _draw_decomposition(mol, core_atoms, rgroups, size=(420, 340)):
+    """Render a molecule with its core and R-groups highlighted.
+
+    Core atoms in blue, R-group atoms in orange, and the cut bonds drawn wide so
+    the decomposition is legible rather than merely colour-coded.
+    """
+    core = set(int(a) for a in core_atoms)
+    rg = set()
+    cut_bonds = []
+    for r in rgroups:
+        rg |= {int(a) for a in r["rgroup_atoms"]}
+        b = mol.GetBondBetweenAtoms(int(r["core_linker"]), int(r["rgroup_linker"]))
+        if b is not None:
+            cut_bonds.append(b.GetIdx())
+    hl_atoms = list(core | rg)
+    colors = {a: (_CORE_RGB if a in core else _RG_RGB) for a in hl_atoms}
+    d = rdMolDraw2D.MolDraw2DCairo(*size)
+    o = d.drawOptions()
+    o.addStereoAnnotation = True
+    o.highlightBondWidthMultiplier = 16
+    rdMolDraw2D.PrepareAndDrawMolecule(
+        d, mol,
+        highlightAtoms=hl_atoms, highlightAtomColors=colors,
+        highlightBonds=cut_bonds,
+        highlightBondColors={b: (0.85, 0.15, 0.15) for b in cut_bonds},
+    )
+    d.FinishDrawing()
+    return d.GetDrawingText()
+
+
+def _page_examples(pdf, examples, title):
+    """A grid of rendered decompositions, one row per example."""
+    import io
+    import matplotlib.image as mpimg
+    n = len(examples)
+    if not n:
+        return
+    fig, axs = plt.subplots(3, 2, figsize=PAGE)
+    fig.suptitle(title, size=14, weight="bold", x=0.09, ha="left")
+    for ax, ex in zip(axs.ravel(), examples):
+        ax.imshow(mpimg.imread(io.BytesIO(ex["png"]), format="png"))
+        ax.set_title(ex["caption"], size=7.5, loc="left")
+        ax.axis("off")
+    for ax in axs.ravel()[n:]:
+        ax.axis("off")
+    fig.text(0.09, 0.045,
+             "blue = core   orange = R-groups   red = cut bonds",
+             size=9, color="0.3")
+    fig.tight_layout(rect=[0, 0.06, 1, 0.95])
+    pdf.savefig(fig); plt.close(fig)
 
 
 def _page_title(pdf, title, subtitle=""):
@@ -94,6 +153,10 @@ def main() -> int:
     ring_cut = joints = 0
     chg = chir = arom = collections.Counter()
     chg, chir, arom = collections.Counter(), collections.Counter(), collections.Counter()
+    # Examples span the k range so the page shows what a k=1 decomposition looks
+    # like next to a multi-R-group one, rather than six near-identical pictures.
+    want_k = [1, 1, 2, 2, 3, 4]
+    examples: list[dict] = []
     for mid in ids[::step][: a.sample]:
         try:
             rec = hydrate(torch.load(str(path_for(root, mid, layout)), weights_only=False))
@@ -104,6 +167,22 @@ def main() -> int:
         chg.update(int(x) for x in g.formal_charge)
         chir.update(int(x) for x in g.chiral_tag)
         m = Chem.MolFromSmiles(rec.get("smiles", "") or "")
+        if m is not None and want_k and 8 <= m.GetNumHeavyAtoms() <= 34:
+            for d in rec["decompositions"]:
+                k = d["n_rgroups"]
+                if k in want_k and len(examples) < 6:
+                    try:
+                        png = _draw_decomposition(m, d["core_atoms"], d["rgroups"])
+                    except Exception:
+                        break
+                    want_k.remove(k)
+                    examples.append({
+                        "png": png,
+                        "caption": (f"{rec['mol_id']}   k={k}   "
+                                    f"core {len(d['core_atoms'])} atoms, "
+                                    f"R-groups {[len(r['rgroup_atoms']) for r in d['rgroups']]}"),
+                    })
+                    break
         for d in rec["decompositions"]:
             core_n.append(len(d["core_atoms"]))
             for r in d["rgroups"]:
@@ -176,7 +255,10 @@ def main() -> int:
         fig.suptitle("D · Size distributions", size=14, weight="bold", x=0.09, ha="left")
         pdf.savefig(fig); plt.close(fig)
 
-        # E. k distribution + chemistry preserved
+        _page_examples(pdf, examples,
+                       f"E · Example decompositions  (ratio {meta.get('core_ratio')})")
+
+        # F. k distribution + chemistry preserved
         fig, axs = plt.subplots(2, 1, figsize=PAGE, gridspec_kw={"hspace": 0.4})
         kc = collections.Counter(ka.tolist())
         kk = sorted(kc)[:10]
@@ -197,7 +279,7 @@ def main() -> int:
         axs[1].set_ylabel("fraction")
         for i, v in enumerate(vals):
             axs[1].text(i, v, f"{v:.2%}", ha="center", va="bottom", size=9)
-        fig.suptitle("E · Decomposition shape & preserved chemistry",
+        fig.suptitle("F · Decomposition shape & preserved chemistry",
                      size=14, weight="bold", x=0.09, ha="left")
         pdf.savefig(fig); plt.close(fig)
 
@@ -221,7 +303,7 @@ def main() -> int:
                 if K <= len(cum):
                     axs[1].annotate(f"hit@{K}={cum[K-1]:.3f}", (K, cum[K-1]),
                                     textcoords="offset points", xytext=(6, -10), size=8)
-            fig.suptitle("F · R-group library skew", size=14, weight="bold", x=0.09, ha="left")
+            fig.suptitle("G · R-group library skew", size=14, weight="bold", x=0.09, ha="left")
             pdf.savefig(fig); plt.close(fig)
 
             rows = [
@@ -232,14 +314,14 @@ def main() -> int:
                 ["top-10 cover", f"{p[order[:10]].sum():.1%}"],
                 ["top-100 cover", f"{p[order[:100]].sum():.1%}"],
             ]
-            _page_table(pdf, "G · R-group library", ["quantity", "value"], rows,
+            _page_table(pdf, "H · R-group library", ["quantity", "value"], rows,
                         note="Effective size, not the raw count, is the number of classes "
                              "retrieval actually chooses between.")
             keys = vocab.keys_by_frequency()[:20]
             rows = [[f"{vocab.entries[h].count:,}",
                      f"{vocab.entries[h].count/counts.sum():.2%}",
                      (vocab.entries[h].smiles or h[:18])[:44]] for h in keys]
-            _page_table(pdf, "H · Most frequent R-groups",
+            _page_table(pdf, "I · Most frequent R-groups",
                         ["count", "share", "SMILES"], rows)
 
     print(f"wrote {a.out}")
