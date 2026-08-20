@@ -97,11 +97,22 @@ class AssemblyLoss(nn.Module):
         near-constant, and two are *structurally* constant on a washed,
         non-ring-cut corpus --
 
-        ``formal_charge``   ``wash()`` neutralises charges, so a joint atom is
-                            always neutral. Measured: 1 class.
-        ``edge_is_aromatic`` cut bonds are never ring bonds (``_filter_cleavable``
-                            drops them), so the reformed bond is never aromatic.
-                            Measured: 1 class.
+        ``edge_is_aromatic`` a reformed cut bond is never aromatic. Measured on
+                            coconut-flavordb_v4: 1 class, 100%. Still holds even
+                            though ``_filter_cleavable`` now permits ring bonds
+                            outside small rings -- a macrocycle bond is cuttable
+                            but not aromatic.
+        ``formal_charge``   NO LONGER degenerate. This previously read "wash()
+                            neutralises charges, so a joint atom is always
+                            neutral; measured 1 class". MolPallete passes
+                            ``neutralise=False`` (organic acids and quaternary
+                            ammonium tastants are chemically load-bearing in
+                            flavour), so it now measures 2 classes -- but at
+                            99.9% majority. That is worse than a clean
+                            degenerate: the rare class appears in only some
+                            batches, so the target flickers in and out of the
+                            macro average batch to batch. Read its ``headroom``,
+                            not the macro mean, when judging it.
 
         Both score ~100% for free and inflate the macro average. So every
         attribute also reports ``majority`` (the constant-predictor rate on this
