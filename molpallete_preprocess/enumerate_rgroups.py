@@ -47,6 +47,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, Iterator, List, Optional, Tuple
 
+import gzip
 import pickle
 import zlib
 
@@ -328,6 +329,24 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     save_vocabulary(vocab, output)
     atomic_write_json(output.with_suffix(".meta.json"), vocab.provenance)
+
+    # Sidecar: hash -> corpus occurrence count, without the graphs.
+    #
+    # Two consumers, both of which need frequencies but not structures:
+    #   * the instance-level common-R-group filter (MolPLA's rule), which has to
+    #     know how common a detached R-group is at __getitem__ time;
+    #   * a corpus-wide logQ estimator. MolDAM measured that batch-count q floors
+    #     at 1/batch_size while true frequencies reach ~3e-5, understating rare
+    #     chemistries up to 65x, and named a global frequency table as the fix.
+    #
+    # Loading the full vocabulary for either would drag 160K masked graphs into
+    # every dataloader worker.
+    counts_path = output.parent / "rgroup_counts.json.gz"
+    tmp = counts_path.with_suffix(counts_path.suffix + ".tmp")
+    with gzip.open(tmp, "wt") as fh:
+        json.dump({k: e.count for k, e in vocab.entries.items()}, fh)
+    tmp.replace(counts_path)
+    print(f"[done] counts     : {counts_path}", flush=True)
 
     print(f"\n{vocab.summary(top_k=15)}")
     print(

@@ -48,3 +48,18 @@ data_module_kwargs:
   #                  molecules that have many cores
   #   molecule       one core drawn per molecule per epoch (MolDAM's idiom)
   sampling_unit:             decomposition
+  # MolPLA's common-R-group filter (paper section 2.1): R-groups at or above this
+  # percentile of the corpus occurrence distribution are "common", and an
+  # instance whose DETACHED R-groups are more than max_common_fraction common is
+  # redrawn. MolPLA used 99.99 / 0.5, taking 1,231,364 (mol, core) tuples down to
+  # 1,054,787 instances.
+  #
+  # This thins the training signal without touching the retrieval library.
+  # Filtering the library instead removes 67.1% of occurrences at p99.9 and makes
+  # that share of queries unscoreable rather than harder.
+  #
+  # null = off. The rule degenerates at k=1 -- "more than half of one R-group is
+  # common" means "the R-group is common" -- so on a naveja corpus it rejects far
+  # harder than it did for MolPLA. Measure before setting it.
+  common_percentile:         null
+  max_common_fraction:       0.5

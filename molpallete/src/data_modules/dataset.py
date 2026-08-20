@@ -34,7 +34,9 @@ record is opened to construct it.
 
 from __future__ import annotations
 
+import gzip
 import json
+import logging
 import random
 from dataclasses import dataclass
 from pathlib import Path
@@ -107,6 +109,8 @@ class MolPalleteDataset(Dataset):
         seed: Optional[int] = None,
         need_assembly_targets: bool = False,
         sampling_unit: str = "decomposition",
+        common_percentile: Optional[float] = None,
+        max_common_fraction: float = 0.5,
     ) -> None:
         self.root = Path(dataset_path)
         meta_path = self.root / "__meta__.json"
@@ -141,6 +145,28 @@ class MolPalleteDataset(Dataset):
                 f"got {sampling_unit!r}"
             )
         self.sampling_unit = sampling_unit
+
+        # MolPLA's common-R-group filter (paper section 2.1). R-groups above
+        # `common_percentile` of the corpus occurrence distribution are
+        # "common"; an instance whose DETACHED R-groups are more than
+        # `max_common_fraction` common is rejected and the islinked subset is
+        # redrawn. MolPLA used the 99.99th percentile and "over half", taking
+        # 1,231,364 (mol, core) tuples down to 1,054,787 instances.
+        #
+        # This filters INSTANCES, not the library. Dropping the frequent entries
+        # from the library instead removes 67.1% of all occurrences at the 99.9th
+        # percentile and makes that share of queries unscoreable rather than
+        # harder -- the retrieval target space must stay complete.
+        #
+        # Note the rule degenerates at k=1: "more than half of one R-group is
+        # common" reduces to "the R-group is common", so on a naveja corpus
+        # (1.11 R-groups per decomposition) it rejects far more aggressively than
+        # it did for MolPLA. Measure before trusting a setting.
+        self.common_percentile = common_percentile
+        self.max_common_fraction = max_common_fraction
+        self._common: set = set()
+        if common_percentile is not None:
+            self._common = self._load_common(common_percentile)
         self._mol_of_item = None
         self._decomp_of_item = None
         if sampling_unit == "decomposition":
@@ -156,6 +182,36 @@ class MolPalleteDataset(Dataset):
             import numpy as _np
             self._mol_of_item = _np.asarray(mol_idx, dtype=_np.int64)
             self._decomp_of_item = _np.asarray(dec_idx, dtype=_np.int64)
+
+    def _load_common(self, percentile: float) -> set:
+        """Hashes at or above *percentile* of the corpus occurrence distribution."""
+        import gzip
+
+        import numpy as np
+
+        path = self.root / "rgroup_counts.json.gz"
+        if not path.is_file():
+            raise FileNotFoundError(
+                f"common-R-group filtering needs {path}, written by "
+                f"enumerate_rgroups.py. Rebuild the vocabulary, or leave "
+                f"common_percentile unset."
+            )
+        with gzip.open(path, "rt") as fh:
+            counts = json.load(fh)
+        if not counts:
+            return set()
+        arr = np.fromiter(counts.values(), dtype=np.float64, count=len(counts))
+        threshold = float(np.percentile(arr, percentile))
+        common = {h for h, c in counts.items() if c >= threshold}
+        share = sum(counts[h] for h in common) / max(arr.sum(), 1.0)
+        logging.getLogger(__name__).info(
+            "[MolPalleteDataset] common-R-group filter: %s of %s hashes at "
+            "p%.2f (count >= %.0f), covering %.1f%% of occurrences; instances "
+            "with >%.0f%% common detached R-groups are redrawn",
+            f"{len(common):,}", f"{len(counts):,}", percentile, threshold,
+            100 * share, 100 * self.max_common_fraction,
+        )
+        return common
 
     def __len__(self) -> int:
         if self.sampling_unit == "decomposition":
@@ -223,7 +279,29 @@ class MolPalleteDataset(Dataset):
                 for r in decomp["rgroups"]
             ),
         )
-        islinked = sample_islinked(len(decomposition.rgroups), self._rng)
+        n_rg = len(decomposition.rgroups)
+        hashes = decomp.get("rgroup_hashes") or []
+        islinked = None
+        # Redraw a few times: for k >= 2 a different subset may keep enough
+        # non-common R-groups, so rejecting the instance outright would discard
+        # usable variants.
+        for _ in range(8 if self._common else 1):
+            cand = sample_islinked(n_rg, self._rng)
+            if not self._common:
+                islinked = cand
+                break
+            detached = [i for i, keep in enumerate(cand) if not keep]
+            if not detached:
+                continue
+            n_common = sum(
+                1 for i in detached
+                if i < len(hashes) and hashes[i] in self._common
+            )
+            if n_common / len(detached) <= self.max_common_fraction:
+                islinked = cand
+                break
+        if islinked is None:
+            return None
 
         try:
             instance = build_instance(

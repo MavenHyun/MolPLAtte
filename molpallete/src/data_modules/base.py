@@ -238,6 +238,12 @@ class DataModuleConfig:
     #: "decomposition" (MolPLA-style: every (molecule, core) pair once per epoch)
     #: or "molecule" (MolDAM-style: one core drawn per molecule per epoch).
     sampling_unit: str = "decomposition"
+    #: MolPLA's common-R-group filter. `null` disables it. R-groups at or above
+    #: this percentile of the corpus occurrence distribution count as "common",
+    #: and an instance whose detached R-groups are more than
+    #: `max_common_fraction` common is redrawn. MolPLA used 99.99 / 0.5.
+    common_percentile: Optional[float] = None
+    max_common_fraction: float = 0.5
 
     def __post_init__(self) -> None:
         if self.dataset_path is None:
@@ -268,6 +274,8 @@ class MolPalleteDataModule(pl.LightningDataModule):
             seed=self.config.seed,
             need_assembly_targets=self.config.need_assembly_targets,
             sampling_unit=self.config.sampling_unit,
+            common_percentile=self.config.common_percentile,
+            max_common_fraction=self.config.max_common_fraction,
         )
         n_total = len(dataset)
         n_val = int(n_total * self.config.val_split)
