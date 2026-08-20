@@ -27,6 +27,8 @@ live in **[`molpallete/docs/molpallete_design.md`](molpallete/docs/molpallete_de
 
 ```
 molpallete_preprocess/       corpus builder      (see its own README)
+  docs/molpallete_corpus_eda.pdf  corpus statistics (regenerate with generate_eda_report.py)
+  generate_eda_report.py       EDA report generator
   preprocess_flavor.py         corpus driver
   enumerate_rgroups.py         R-group library vocabulary builder
   molpallete_prep/             the package
@@ -34,7 +36,6 @@ molpallete_preprocess/       corpus builder      (see its own README)
   scripts/build_all_vocabs.sh
 molpallete/                  training repo
   docs/molpallete_design.md    design contract + open items
-  docs/molpallete_corpus_eda.pdf  corpus statistics (regenerate: generate_eda_report.py)
   docs/archive/                superseded results, with what changed under them
   src/configs/                 Hydra config groups
   src/data_modules/            four-view dataset + collate

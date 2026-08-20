@@ -12,7 +12,7 @@ backend, one figure per page -- so the two projects' reports read alike.
 
     python generate_eda_report.py \\
       --corpus /home/mogan/preprocessed/molpallete/coconut-flavordb_full_v2/naveja_recap \\
-      --out ../molpallete/docs/molpallete_corpus_eda.pdf
+      --out docs/molpallete_corpus_eda.pdf
 """
 
 from __future__ import annotations

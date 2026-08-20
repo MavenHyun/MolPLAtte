@@ -203,7 +203,7 @@ directory was `molpallete_preprocess`, so that is the repo name and
 
 ## 5. Measured results
 
-Current corpus statistics live in **[`molpallete_corpus_eda.pdf`](molpallete_corpus_eda.pdf)**,
+Current corpus statistics live in **[`molpallete_preprocess/docs/molpallete_corpus_eda.pdf`](../../molpallete_preprocess/docs/molpallete_corpus_eda.pdf)**,
 regenerated with `molpallete_preprocess/generate_eda_report.py`.
 
 Results from the macfrag / condition-vector era are archived in
