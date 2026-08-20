@@ -283,7 +283,11 @@ def _source_items(args, size_filter: SizeFilter, skip: set) -> Iterator[tuple]:
 def _build_method_kwargs(args) -> dict:
     """Translate CLI flags into the selected decomposer's keyword arguments."""
     if args.method == "naveja_recap":
-        return {"ratio": args.core_ratio, "include_ring": not args.no_ring_aware}
+        return {
+            "ratio": args.core_ratio,
+            "include_ring": not args.no_ring_aware,
+            "max_cores": args.max_cores,
+        }
     if args.method == "bemis_murcko":
         return {}
     return {}  # macfrag / synton take their partition defaults

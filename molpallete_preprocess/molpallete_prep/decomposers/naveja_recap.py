@@ -32,54 +32,70 @@ from .anchored_common import filter_safe
 
 
 def decompose_naveja_recap(mol: Chem.Mol,
-                            ratio: float = 2.0 / 3.0,
-                            include_ring: bool = True,
-                            ) -> List[Decomposition]:
-    """RECAP children + Naveja core-size filter + ring-aware fallback.
+                           ratio: float = 2.0 / 3.0,
+                           include_ring: bool = True,
+                           max_cores: int = 6,
+                           ) -> List[Decomposition]:
+    """Naveja putative cores: cut every RECAP bond, then take connected
+    fragment-subtrees above ``ratio * n_atoms`` as cores.
 
-    Parameters
-    ----------
-    ratio
-        Heavy-atom share of M required of a candidate core. ``2/3`` is the
-        long-standing default here; ``2/5`` and ``1/6`` are the more
-        permissive Naveja settings.
+    REWRITTEN. The previous implementation used RECAP *children* as cores
+    (``Recap.RecapDecompose(...).GetAllChildren()``), and a child is a single
+    connected fragment, so ``M - core`` was one pendant group almost always. That
+    produced 1.08 R-groups per decomposition and only 6.7-9.5% of decompositions
+    with k >= 2, which makes MolPLA's islinked subset space (``2^k - 1``) and the
+    core-decoration objective nearly vacuous.
 
-        Measured on 3,000 fresh ZINC molecules (mean 23.6 heavy atoms), one
-        decomposition sampled per molecule as the dataset draws it:
+    MolPLA's released dataset shows that is not what its decomposition does. From
+    ``molpla-datasets.tar.gz``, DrugBank split, ids ``{mol}-CORE-{core}-{islinked}``:
 
-            ratio   dec/mol   core nHA   rgroup nHA   >=2 R-groups
-            2/3        6.01       20.8          2.7          0.23%
-            3/5        7.03       20.0          3.6          0.30%
-            1/2        8.88       18.5          5.1          0.83%
-            2/5        9.68       17.8          5.7          1.93%
-            1/6          --       16.8           --          6.90%
+        k = 1   47.3%
+        k >= 2  52.7%      cores/molecule 3.15
 
-        Read the last column before choosing: **this decomposer is
-        single-R-group at every practical setting.** On the full 708,300-record
-        ZINC-1pct corpus at 2/3, 99.4172% of records have exactly one R-group
-        and only 0.5828% have two or more (max 4). Even 2/5 leaves 98% single.
+    -- majority multi-R-group, against 9.5% here. So the single-R-group behaviour
+    was an artefact of the child-as-core construction, not a property of Naveja's
+    method. (MolDAM_prep's own docstring had already retracted the claim that
+    ratio=2/3 "reproduces MolPLA-paper behaviour"; this measures why.)
 
-        The cause is structural, not a threshold effect: ``find_putative_cores``
-        takes RECAP *children* as candidate cores, and a child is one connected
-        fragment, so ``M - core`` is usually one pendant group no matter how
-        small the core is allowed to be. If genuinely multi-R-group
-        decompositions are needed, lower ``ratio`` will not deliver them -- use
-        a multi-cut decomposer (the fragments paradigm's ``max_cuts``).
+    The fix reuses the machinery that already produces MolPLA-shaped cores for
+    the multi-cut methods: cut ALL RECAP bonds into a flat partition, then take
+    connected subtrees of the resulting fragment tree as cores, with every
+    boundary fragment-component becoming an R-group. ``ratio`` keeps its Naveja
+    meaning -- a core must hold at least that fraction of the molecule's atoms.
 
-        NOTE: the claim that 2/3 "reproduces MolPLA-paper behaviour", carried in
-        this docstring historically, could NOT be verified -- the public MolPLA
-        repository ships its dataloaders but not its decomposition step, and no
-        ratio appears anywhere in it.
-    include_ring
-        If True (default), also apply the ring-aware fallback to recover
-        non-ring single-bond cuts that RECAP doesn't reach.
+    ``include_ring`` additionally admits ring-substituent cores, as before.
     """
-    decs = find_putative_cores(mol, ratio=ratio)
-    if include_ring:
-        extra = find_ring_substituent_cores(mol, ratio=ratio)
-        seen = {d.core_atoms for d in decs}
-        for d in extra:
-            if d.core_atoms not in seen:
-                decs.append(d)
-                seen.add(d.core_atoms)
-    return filter_safe(mol, decs)
+    from ..anchored_from_partition import partitions_to_decompositions
+    from .recap import decompose_recap
+
+    parts = decompose_recap(mol)
+    cands: List[Decomposition] = []
+    if parts:
+        # Uncapped here: the cap is applied once, globally, after the
+        # ring-substituent cores are merged in. Capping before the merge let the
+        # ring cores -- which are single-R-group by construction -- displace
+        # multi-R-group candidates and pushed k>=2 back down from 46.5% to 20.1%.
+        cands = partitions_to_decompositions(
+            parts, mol.GetNumAtoms(), ratio=ratio, max_cores=1 << 30,
+        )
+    if include_ring and not cands:
+        # FALLBACK ONLY. Ring-substituent cores are single-R-group by
+        # construction, so mixing them in wholesale dilutes k: measured k>=2
+        # falls 60.8% -> 36.7% when they always participate. Used only when the
+        # RECAP fragment tree yields no core, they rescue the 26% of molecules
+        # that would otherwise be dropped without costing k on the rest.
+        cands.extend(find_ring_substituent_cores(mol, ratio))
+
+    by_core = {}
+    for d in cands:
+        prev = by_core.get(d.core_atoms)
+        if prev is None or len(d.rgroups) > len(prev.rgroups):
+            by_core[d.core_atoms] = d
+    ranked = sorted(
+        by_core.values(),
+        key=lambda d: (-len(d.rgroups), -len(d.core_atoms), d.core_atoms),
+    )
+    # MolPLA excluded molecules above 10 cores (its 99th percentile was 11) and
+    # reports ~3-4 cores per molecule; ranking multi-R-group cores first means the
+    # cap keeps the informative ones.
+    return filter_safe(mol, ranked[:max_cores])
