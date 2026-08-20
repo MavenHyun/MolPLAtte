@@ -219,7 +219,7 @@ class DataModuleConfig:
     """
 
     dataset_path: Optional[Path] = None
-    dataset_version: str = "coconut-flavordb_full_v2"
+    dataset_version: str = "coconut-flavordb_v3"
     decomposition_method: str = "naveja_recap"
     batch_size: int = 512
     num_workers: int = 8
