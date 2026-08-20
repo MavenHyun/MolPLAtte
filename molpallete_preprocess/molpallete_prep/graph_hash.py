@@ -19,7 +19,8 @@ from torch_geometric.data import Data
 #:      is_aromatic, is_linker) / (bond_type, edge_is_aromatic, is_conjugated,
 #:      bond_dir, bond_stereo, edge_is_linker)
 #: v2: chiral_tag -> chirality_specified; dropped is_conjugated and bond_dir.
-HASH_VERSION = 2
+#: v3: dropped hybridization (parent-context leakage; see below).
+HASH_VERSION = 3
 
 
 def subgraph_hash(data: Data, iterations: int = 3, digest_size: int = 16) -> str:
@@ -29,17 +30,17 @@ def subgraph_hash(data: Data, iterations: int = 3, digest_size: int = 16) -> str
 
     Labels used:
       - Node: (atomic_num, formal_charge, chirality_specified,
-        hybridization, num_explicit_hs, is_aromatic, is_linker).
+        num_explicit_hs, is_aromatic, is_linker).
       - Edge: (bond_type, edge_is_aromatic, bond_stereo, edge_is_linker).
 
-    Three attributes are deliberately EXCLUDED because they are not
+    Four attributes are deliberately EXCLUDED because they are not
     properties of the isolated sub-graph. Including them splits
     chemically identical R-groups across several library rows, which
     inflates the row count, divides an R-group's frequency mass, and
     depresses Hit@K by letting a query's mass land on an identical
     sibling that scores as a miss. Measured on a 60,773-row library:
-    6,235 SMILES labels were split across multiple hashes, and these
-    three were the sole cause for 3,208 of them.
+    6,235 SMILES labels were split across multiple hashes, and the
+    first three below were the sole cause for 3,208 of them.
 
     ``chiral_tag`` (sole cause of 2,562 splits)
         ``CHI_TETRAHEDRAL_CW/CCW`` is defined relative to the atom's
@@ -70,14 +71,39 @@ def subgraph_hash(data: Data, iterations: int = 3, digest_size: int = 16) -> str
         longer present -- two identical fragments differ according to
         what they used to be attached to.
 
+    ``hybridization`` (sole cause of 367 of the 400 largest splits)
+        Retained through v2 on the reasoning that it is intrinsic to the
+        atom. It is not. RDKit assigns it from the atom's bonding in the
+        PARENT, so a detached fragment carries a fingerprint of what it
+        used to be attached to -- the same defect as ``is_conjugated``.
+        A two-atom ``*O`` cannot have an intrinsic hybridization at all,
+        yet it split into SP3 (616,507 occurrences, from alcohols) and
+        SP2 (349,265, from phenols and esters).
+
+        On the v3 corpus this split 2,137 SMILES labels across 4,377
+        rows and touched 75% of all R-group occurrences. Dropping it
+        merges 2,246 rows (50,550 -> 48,304) and leaves 306 splits.
+
+        Verified not to over-merge: of the 328 resulting groups that mix
+        distinct SMILES, 325 (99.1%) differ ONLY by stereochemistry --
+        already this hash's documented behaviour under
+        ``chirality_specified``, previously masked by hybridization
+        happening to differ. The 3 genuine collisions are WL
+        iteration-depth limits on long chains (a C=C at position 7 vs 9
+        looks locally identical), not attribute loss.
+
     ``linker_id`` values are likewise NOT part of the hash. Two
     structurally identical sub-graphs that carry different joint IDs
     hash to the same key.
 
-    Note that ``hybridization`` and ``num_explicit_hs`` ARE retained
-    despite also splitting same-SMILES groups: both are intrinsic to the
-    atom, and the splitting there reflects the SMILES *label* being
-    lossy rather than the hash being wrong.
+    Note that ``num_explicit_hs`` IS retained despite also splitting
+    same-SMILES groups (7 of the top 400): it is genuinely intrinsic,
+    and the splitting there reflects the SMILES *label* being lossy
+    rather than the hash being wrong.
+
+    This concerns the vocabulary KEY only. ``hybridization`` remains an
+    input feature of the encoder; it is simply not part of the identity
+    of an R-group.
 
     Returns
     -------
@@ -95,7 +121,6 @@ def subgraph_hash(data: Data, iterations: int = 3, digest_size: int = 16) -> str
             int(data.atomic_num[i].item()),
             int(data.formal_charge[i].item()),
             int(int(data.chiral_tag[i].item()) != 0),
-            int(data.hybridization[i].item()),
             int(data.num_explicit_hs[i].item()),
             int(data.is_aromatic[i].item()),
             int(data.is_linker[i].item()),
