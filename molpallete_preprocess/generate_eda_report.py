@@ -135,6 +135,8 @@ def main() -> int:
     ap.add_argument("--corpus", required=True)
     ap.add_argument("--out", required=True)
     ap.add_argument("--sample", type=int, default=6000)
+    ap.add_argument("--vocab", default=None,
+                    help="R-group vocabulary (default <corpus>/rgroup_vocab.pkl.gz)")
     a = ap.parse_args()
 
     root = Path(a.corpus)
@@ -195,7 +197,7 @@ def main() -> int:
                             ring_cut += 1
 
     vocab = None
-    vpath = root / "rgroup_vocab.pkl.gz"
+    vpath = Path(a.vocab) if a.vocab else root / "rgroup_vocab.pkl.gz"
     if vpath.is_file():
         vocab = load_vocabulary(vpath)
 
