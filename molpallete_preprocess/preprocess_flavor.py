@@ -287,6 +287,7 @@ def _build_method_kwargs(args) -> dict:
             "ratio": args.core_ratio,
             "include_ring": not args.no_ring_aware,
             "max_cores": args.max_cores,
+            "min_rgroup_atoms": args.min_rgroup_atoms,
         }
     if args.method == "bemis_murcko":
         return {}
@@ -334,6 +335,12 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         help="a core must hold at least this fraction of the molecule's atoms",
     )
     decomp.add_argument("--max-cores", type=int, default=10)
+    decomp.add_argument("--min-rgroup-atoms", type=int, default=1,
+                        help="Reject a core if ANY of its R-groups has fewer "
+                             "heavy atoms than this. 2 removes single-atom "
+                             "R-groups, which otherwise dominate the retrieval "
+                             "targets (42 such rows carried 57.3%% of "
+                             "occurrences on the ratio-0.4 corpus).")
     decomp.add_argument("--max-rgroups", type=int, default=8)
     decomp.add_argument("--no-ring-aware", action="store_true")
     decomp.add_argument(
