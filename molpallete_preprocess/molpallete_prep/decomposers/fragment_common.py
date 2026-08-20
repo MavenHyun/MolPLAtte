@@ -35,15 +35,33 @@ from ..fragment_graph_ops import partition_from_bonds
 
 
 def _filter_cleavable(mol: Chem.Mol,
-                      bonds: Sequence[Tuple[int, int]]
+                      bonds: Sequence[Tuple[int, int]],
+                      max_small_ring: int = 8,
                       ) -> List[Tuple[int, int]]:
-    """Drop bonds that are missing in M or part of a ring; dedupe."""
+    """Drop bonds missing in M or inside a SMALL ring; dedupe.
+
+    Previously this dropped every ring bond, which silently discarded MacFrag's
+    own macrocycle handling: its ``SSSRsize_filter`` (vendor/macfrag.py:162)
+    deliberately permits cutting a ring bond that is *not* in any ring of size
+    3..maxSR, so macrolides and macrocyclic glycosides can be opened. Refusing
+    all ring bonds meant those molecules could only ever be cut at the
+    periphery -- 2.2% of COCONUT contains a ring larger than 8 atoms.
+
+    A single ring cut does not disconnect anything; two or more on the same ring
+    do. Non-separating cuts are dropped downstream in
+    ``fragment_graph_ops._build_partition_from_adj`` rather than here, because
+    whether a cut separates depends on the whole cut set, not on the bond alone.
+    """
     seen: set = set()
     out: List[Tuple[int, int]] = []
     for a, b in bonds:
         a, b = int(a), int(b)
         bond = mol.GetBondBetweenAtoms(a, b)
-        if bond is None or bond.IsInRing():
+        if bond is None:
+            continue
+        if bond.IsInRing() and any(
+            bond.IsInRingSize(k) for k in range(3, max_small_ring + 1)
+        ):
             continue
         key = (min(a, b), max(a, b))
         if key in seen:

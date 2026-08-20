@@ -37,7 +37,8 @@ def _macfrag_smis(mol: Chem.Mol,
                    asMols=False, minFragAtoms=min_frag_atoms)
 
 
-def _macfrag_bonds(mol: Chem.Mol, frag_smis: List[str]) -> List[Tuple[int, int]]:
+def _macfrag_bonds(mol: Chem.Mol, frag_smis: List[str],
+                   max_sr: int = 8) -> List[Tuple[int, int]]:
     """Recover the cleavable bonds in M from MacFrag's labelled-fragment
     SMILES list.
 
@@ -93,7 +94,17 @@ def _macfrag_bonds(mol: Chem.Mol, frag_smis: List[str]) -> List[Tuple[int, int]]
                     if nb.GetIdx() in match_set:
                         continue
                     bond_obj = mol.GetBondBetweenAtoms(m_core, nb.GetIdx())
-                    if bond_obj is None or bond_obj.IsInRing():
+                    if bond_obj is None:
+                        continue
+                    # Small-ring bonds only are refused. MacFrag's own
+                    # SSSRsize_filter permits cutting a ring bond that is not in
+                    # any ring of size 3..maxSR, which is how it opens
+                    # macrocycles; rejecting every ring bond here threw that
+                    # away. _filter_cleavable applies the same rule, and
+                    # non-separating cuts are dropped when the partition is built.
+                    if bond_obj.IsInRing() and any(
+                        bond_obj.IsInRingSize(k) for k in range(3, max_sr + 1)
+                    ):
                         continue
                     bonds.add((min(m_core, nb.GetIdx()),
                                max(m_core, nb.GetIdx())))
@@ -111,5 +122,5 @@ def decompose_macfrag(mol: Chem.Mol,
         smis = _macfrag_smis(mol, max_blocks, max_sr, min_frag_atoms)
     except Exception:
         return []
-    bonds = _macfrag_bonds(mol, smis)
+    bonds = _macfrag_bonds(mol, smis, max_sr=max_sr)
     return bonds_to_partitions(mol, bonds, max_cuts=max_cuts)

@@ -168,7 +168,8 @@ def _process_one(item: Tuple[str, str, str, dict]) -> Tuple[str, str, Optional[d
     """
     mol_id, smiles, source, meta = item
     try:
-        mol = wash(smiles, remove_stereo=not _W["keep_stereo"])
+        mol = wash(smiles, remove_stereo=not _W["keep_stereo"],
+                   neutralise=_W["neutralise"])
         if mol is None:
             return mol_id, "wash_failed", None
 
@@ -339,6 +340,15 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         "cis/trans isomerism is chemically load-bearing in flavor -- "
         "(Z)- and (E)-3-hexenol are different odorants.",
     )
+    decomp.add_argument(
+        "--neutralise",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="apply charge-neutralisation during washing. OFF by default: 4.6%% "
+        "of FlavorDB and 2.8%% of COCONUT carry a formal charge (organic acids, "
+        "amino acids, quaternary ammonium tastants), and neutralising collapses "
+        "formal_charge to one class.",
+    )
     decomp.add_argument("--condvec-mode", choices=CONDVEC_MODES, default="neutral")
 
     out = parser.add_argument_group("output")
@@ -405,6 +415,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         "max_cores": args.max_cores,
         "max_rgroups": args.max_rgroups,
         "keep_stereo": args.keep_stereo,
+        "neutralise": args.neutralise,
         "condvec_mode": args.condvec_mode,
         "output_path": str(out_path),
         "layout": args.layout,
@@ -426,6 +437,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         ("max_rgroups", args.max_rgroups),
         ("heavy_atoms", f"[{args.min_heavy_atoms}, {args.max_heavy_atoms}]"),
         ("keep_stereo", args.keep_stereo),
+        ("neutralise", args.neutralise),
         ("condvec", f"{args.condvec_mode} (dim {condvec_dim})"),
         ("output_path", str(out_path)),
         ("layout", args.layout),
@@ -517,6 +529,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         "max_cores": args.max_cores,
         "max_rgroups": args.max_rgroups,
         "keep_stereo": args.keep_stereo,
+        "neutralise": args.neutralise,
         "size_filter": size_filter.as_dict(),
         "condvec_mode": args.condvec_mode,
         "condvec_dim": condvec_dim,

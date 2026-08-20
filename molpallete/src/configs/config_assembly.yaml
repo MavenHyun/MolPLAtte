@@ -20,16 +20,22 @@ assembly:
                        # different loss objectives" -- a fourth at full weight is
                        # the obvious way to make that worse. Sweep this.
   head_kwargs:
-    # formal_charge and edge_is_aromatic are DROPPED: both are structurally
-    # constant on this corpus (measured 1 class each). wash() neutralises
-    # charges, and cut bonds are never ring bonds, so the reformed bond is never
-    # aromatic. They cost head capacity and score ~100% for free.
+    # All recoverable attributes are ON. The three previously dropped are back:
     #
-    # Measured majority-class rates for the rest, which is what makes them worth
-    # predicting: hybridization 0.564, is_conjugated 0.653, atomic_num 0.715,
-    # is_aromatic 0.831, num_explicit_hs 0.862, bond_type 0.873.
-    # bond_stereo is retained but is nearly degenerate at 0.989.
-    node_attrs: [atomic_num, num_explicit_hs, hybridization, is_aromatic]
-    edge_attrs: [bond_type, is_conjugated, bond_stereo]
+    #   formal_charge        was degenerate ONLY because wash() neutralised
+    #                        charges. The corpus is now built with
+    #                        --no-neutralise, so it carries real signal (4.6% of
+    #                        FlavorDB, 2.8% of COCONUT are charged).
+    #   edge_is_aromatic     was degenerate ONLY because every ring bond was
+    #                        filtered out of the cut set. Ring cuts outside small
+    #                        rings are now permitted, so a reformed bond can be
+    #                        aromatic.
+    #   chirality_specified  order-independent stereocentre flag. 67.5% of washed
+    #                        COCONUT molecules carry specified atom stereo, and
+    #                        the head was rebuilding joints without deciding it --
+    #                        for flavour that is the carvone problem.
+    node_attrs: [atomic_num, formal_charge, chirality_specified, hybridization,
+                 num_explicit_hs, is_aromatic]
+    edge_attrs: [bond_type, edge_is_aromatic, is_conjugated, bond_stereo]
     fusion:     concat
     coupling:   false

@@ -57,8 +57,22 @@ def _neutralise(mol: Chem.Mol) -> Chem.Mol:
     return cur
 
 
-def wash(mol_or_smiles, remove_stereo: bool = True) -> Optional[Chem.Mol]:
-    """Return a sanitized largest-fragment Mol, or None on failure."""
+def wash(mol_or_smiles, remove_stereo: bool = True,
+         neutralise: bool = True) -> Optional[Chem.Mol]:
+    """Return a sanitized largest-fragment Mol, or None on failure.
+
+    Parameters
+    ----------
+    remove_stereo
+        MolPallete passes ``False``: cis/trans isomerism is chemically
+        load-bearing in flavour ((Z)- vs (E)-3-hexenol are different odorants).
+    neutralise
+        Apply the charge-neutralisation reactions. MolPallete passes ``False``:
+        4.6% of FlavorDB and 2.8% of COCONUT carry a formal charge before
+        washing -- organic acids, amino acids, quaternary ammonium tastants --
+        and neutralising them collapses ``formal_charge`` to a single class,
+        which is why it was previously a degenerate recovery target.
+    """
     if isinstance(mol_or_smiles, str):
         # Largest fragment first (Naveja heuristic for salt removal).
         parts = [p for p in mol_or_smiles.split(".") if p]
@@ -84,7 +98,8 @@ def wash(mol_or_smiles, remove_stereo: bool = True) -> Optional[Chem.Mol]:
     except Exception:
         return None
 
-    mol = _neutralise(mol)
+    if neutralise:
+        mol = _neutralise(mol)
     try:
         Chem.SanitizeMol(mol)
     except Exception:

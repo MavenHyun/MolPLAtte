@@ -362,8 +362,9 @@ def partition_from_bonds(mol_or_data,
 
     Each entry of ``cut_bonds`` is ``(atom_a, atom_b)``; the function:
 
-    1. Verifies each bond exists in M (and is not a ring bond — cutting a
-       ring bond doesn't disconnect anything by itself).
+    1. Verifies each bond exists in M. Ring bonds ARE permitted: two or more
+       cuts on the same ring separate it, and cuts that turn out not to
+       separate anything are dropped in step 3.
     2. Computes the connected components of ``M`` with those bonds
        removed.
     3. Assigns each component a fragment index (sorted by smallest atom
@@ -376,7 +377,7 @@ def partition_from_bonds(mol_or_data,
     Raises
     ------
     ValueError
-        If any bond is missing or in a ring.
+        If any bond is missing from M.
     """
     if hasattr(mol_or_data, "GetBonds"):
         return _partition_from_bonds_mol(mol_or_data, cut_bonds)
@@ -391,9 +392,10 @@ def _partition_from_bonds_mol(mol, cut_bonds):
         bond = mol.GetBondBetweenAtoms(int(a), int(b))
         if bond is None:
             raise ValueError(f"no bond between atoms {a} and {b} in mol")
-        if bond.IsInRing():
-            raise ValueError(
-                f"bond {a}-{b} is in a ring; cutting it alone won't disconnect")
+        # Ring bonds are allowed: two or more cuts on the same ring DO
+        # separate it. A cut that turns out not to separate anything is dropped
+        # in _build_partition_from_adj, which is the only place with enough
+        # information to tell.
         cut_set.add(tuple(sorted((int(a), int(b)))))
 
     # Adjacency excluding cut bonds.
@@ -453,8 +455,17 @@ def _build_partition_from_adj(adj, n, cut_set):
             atom_to_frag[a] = fi
         fragments.append(FragmentInfo(atoms_in_M=tuple(comp)))
 
+    # A cut whose endpoints land in the SAME component did not separate
+    # anything -- a lone ring cut, or one of several where the others already
+    # did the work. FragmentPartition requires u_frag != v_frag, and a
+    # self-referential CutBond would break detach_fragments, so drop it. The
+    # bond stays intact in the graph, which is the correct outcome.
     cuts = []
-    for k, (u, v) in enumerate(sorted(cut_set), start=1):
+    k = 0
+    for (u, v) in sorted(cut_set):
+        if atom_to_frag[u] == atom_to_frag[v]:
+            continue
+        k += 1
         cuts.append(CutBond(
             linker_id=k,
             u_atom_in_M=u,
