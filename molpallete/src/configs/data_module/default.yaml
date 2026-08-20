@@ -7,7 +7,7 @@
 data_module: MolPalleteDataModule
 data_module_kwargs:
   dataset_path:           null
-  dataset_version:        coconut-flavordb_full
+  dataset_version:        coconut-flavordb_full_v2
   # macfrag, not naveja_recap. MolPLA's formulation needs k >= 2 R-groups for
   # the `islinked` bitmask and the core-decoration objective to be
   # non-degenerate, and naveja_recap with a ratio threshold cannot produce
@@ -17,7 +17,7 @@ data_module_kwargs:
   # so it is not a tuning problem. macfrag measured 8.01 frags/mol at 4.67
   # heavy atoms, the best multi-cut candidate. See docs/molpallete_design.md
   # sec.3.1.
-  decomposition_method:   macfrag
+  decomposition_method:   naveja_recap
   batch_size:             512
   num_workers:            8
   val_split:              0.05
@@ -39,3 +39,12 @@ data_module_kwargs:
   # Derive pre-mask joint chemistry for the assembly head. Costs a little CPU
   # per __getitem__ and nothing on disk. Must be true when the head is enabled.
   need_assembly_targets:     false
+  # MolPLA's augmentation is two-stage: one molecule yields many putative cores,
+  # and one core yields the islinked subsets (detached R-groups are the targets,
+  # the remaining ones stay attached to form the query template P).
+  #
+  #   decomposition  every (molecule, core) pair once per epoch -- 8.2x more
+  #                  instances on the naveja corpus, and no longer under-samples
+  #                  molecules that have many cores
+  #   molecule       one core drawn per molecule per epoch (MolDAM's idiom)
+  sampling_unit:             decomposition

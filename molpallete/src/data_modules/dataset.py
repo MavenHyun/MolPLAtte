@@ -7,12 +7,29 @@ all ``2**k - 1`` islinked subsets on disk would multiply the corpus by ~9x at th
 measured 2.69 mean R-groups per decomposition, so the detach happens here, once
 per ``__getitem__``.
 
-Sampling semantics follow MolDAM: ``__len__`` is the number of *molecules*, and
-each ``__getitem__`` draws one decomposition and then one islinked pattern.  Over
-epochs a molecule is seen under many different (core, subset) framings.  The
-per-molecule variant count is ``sum_d (2**k_d - 1)``, which at the measured
-7.27 decompositions x 2.69 R-groups is on the order of 40 variants; budget
-epochs accordingly (``P(seen after T epochs) ~ 1 - ((v-1)/v)**T``).
+Sampling unit
+-------------
+MolPLA's augmentation is two-stage: **one molecule yields many putative cores**,
+and **one core with n R-groups yields the subsets** -- for each non-empty subset
+*k*, the detached R-groups become the retrieval targets and the *remaining* ones
+stay attached to form the query template ``P`` (paper Eq. 3).
+
+``sampling_unit`` chooses how much of that is exposed per epoch:
+
+``"decomposition"`` (default, MolPLA-style)
+    ``__len__`` is the number of usable ``(molecule, core)`` pairs. Every core is
+    visited once per epoch; the islinked subset is drawn per call. On the naveja
+    corpus that is 3,372,588 instances per epoch against 411,456 molecules --
+    **8.2x more**, and it removes the bias whereby a molecule with one core and a
+    molecule with twenty were sampled equally often.
+
+``"molecule"`` (MolDAM-style)
+    ``__len__`` is the number of molecules; one core is drawn per call. Cheaper
+    per epoch, but a high-core molecule is under-sampled in exactly the cases
+    that carry the most structure.
+
+The flat ``(mol, decomp)`` index is built from ``__meta__.json`` alone -- no
+record is opened to construct it.
 """
 
 from __future__ import annotations
@@ -89,6 +106,7 @@ class MolPalleteDataset(Dataset):
         max_rgroups: int = 8,
         seed: Optional[int] = None,
         need_assembly_targets: bool = False,
+        sampling_unit: str = "decomposition",
     ) -> None:
         self.root = Path(dataset_path)
         meta_path = self.root / "__meta__.json"
@@ -117,7 +135,31 @@ class MolPalleteDataset(Dataset):
         self.ids: List[str] = list(meta["ids"])
         self._rng = random.Random(seed)
 
+        if sampling_unit not in ("decomposition", "molecule"):
+            raise ValueError(
+                f"sampling_unit must be 'decomposition' or 'molecule', "
+                f"got {sampling_unit!r}"
+            )
+        self.sampling_unit = sampling_unit
+        self._mol_of_item = None
+        self._decomp_of_item = None
+        if sampling_unit == "decomposition":
+            # Index only decompositions this dataset can actually use, so an
+            # item index always maps to a valid (mol, decomp) pair -- filtering
+            # later would desynchronise the mapping.
+            mol_idx, dec_idx = [], []
+            for mi, ks in enumerate(meta.get("n_rgroups_per_decomp", [])):
+                for di, k in enumerate(ks):
+                    if 1 <= k <= max_rgroups:
+                        mol_idx.append(mi)
+                        dec_idx.append(di)
+            import numpy as _np
+            self._mol_of_item = _np.asarray(mol_idx, dtype=_np.int64)
+            self._decomp_of_item = _np.asarray(dec_idx, dtype=_np.int64)
+
     def __len__(self) -> int:
+        if self.sampling_unit == "decomposition":
+            return int(self._mol_of_item.shape[0])
         return len(self.ids)
 
     def _load(self, index: int) -> Optional[dict]:
@@ -131,26 +173,43 @@ class MolPalleteDataset(Dataset):
         return hydrate(raw)
 
     def __getitem__(self, index: int) -> MolPalleteSample:
+        n = len(self)
         for step in range(_MAX_SKIP):
-            record = self._load((index + step) % len(self.ids))
+            item = (index + step) % n
+            if self.sampling_unit == "decomposition":
+                mol_i = int(self._mol_of_item[item])
+                dec_i = int(self._decomp_of_item[item])
+            else:
+                mol_i, dec_i = item, None
+            record = self._load(mol_i)
             if record is None:
                 continue
-            sample = self._to_sample(record)
+            sample = self._to_sample(record, dec_i)
             if sample is not None:
                 return sample
         raise RuntimeError(
             f"no usable record within {_MAX_SKIP} indices of {index} in {self.root}"
         )
 
-    def _to_sample(self, record: dict) -> Optional[MolPalleteSample]:
-        usable = [
-            d
-            for d in record["decompositions"]
-            if 1 <= d["n_rgroups"] <= self.max_rgroups
-        ]
-        if not usable:
-            return None
-        decomp = usable[self._rng.randrange(len(usable))]
+    def _to_sample(self, record: dict,
+                   decomp_index: Optional[int] = None) -> Optional[MolPalleteSample]:
+        decomps = record["decompositions"]
+        chosen_index = decomp_index
+        if decomp_index is not None:
+            # Addressed directly: the caller already knows which core it wants.
+            if decomp_index >= len(decomps):
+                return None
+            decomp = decomps[decomp_index]
+            if not (1 <= decomp["n_rgroups"] <= self.max_rgroups):
+                return None
+        else:
+            usable = [
+                (i, d) for i, d in enumerate(decomps)
+                if 1 <= d["n_rgroups"] <= self.max_rgroups
+            ]
+            if not usable:
+                return None
+            chosen_index, decomp = usable[self._rng.randrange(len(usable))]
 
         decomposition = Decomposition(
             core_smiles=decomp.get("core_smiles", ""),
@@ -172,6 +231,10 @@ class MolPalleteDataset(Dataset):
                 decomposition,
                 islinked,
                 mol_id=record["mol_id"],
+                # Without this every instance id reads "#0" regardless of which
+                # core produced it -- the id would not identify the instance,
+                # and prediction tables and retrieval rows key off it.
+                decomp_idx=int(chosen_index or 0),
                 store_orig=self.need_assembly_targets,
                 compute_hashes=False,
             )

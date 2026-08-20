@@ -219,8 +219,8 @@ class DataModuleConfig:
     """
 
     dataset_path: Optional[Path] = None
-    dataset_version: str = "coconut-flavordb_full"
-    decomposition_method: str = "macfrag"
+    dataset_version: str = "coconut-flavordb_full_v2"
+    decomposition_method: str = "naveja_recap"
     batch_size: int = 512
     num_workers: int = 8
     val_split: float = 0.05
@@ -235,6 +235,9 @@ class DataModuleConfig:
     #: Derive pre-mask joint chemistry for the assembly head. Costs a little
     #: CPU per __getitem__ and nothing on disk; off unless the head is enabled.
     need_assembly_targets: bool = False
+    #: "decomposition" (MolPLA-style: every (molecule, core) pair once per epoch)
+    #: or "molecule" (MolDAM-style: one core drawn per molecule per epoch).
+    sampling_unit: str = "decomposition"
 
     def __post_init__(self) -> None:
         if self.dataset_path is None:
@@ -264,6 +267,7 @@ class MolPalleteDataModule(pl.LightningDataModule):
             max_rgroups=self.config.max_rgroups,
             seed=self.config.seed,
             need_assembly_targets=self.config.need_assembly_targets,
+            sampling_unit=self.config.sampling_unit,
         )
         n_total = len(dataset)
         n_val = int(n_total * self.config.val_split)
