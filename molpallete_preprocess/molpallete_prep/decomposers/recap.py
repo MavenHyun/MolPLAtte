@@ -19,6 +19,12 @@ from ..fragment_types import FragmentPartition
 from .fragment_common import bonds_to_partitions
 
 
+# Runaway guard. Distinct RECAP hierarchy nodes visited per molecule; the walk
+# stops early once this many have been processed. 4096 is far above what any
+# well-behaved molecule needs (the 99.9th percentile of COCONUT is under 200).
+_MAX_RECAP_NODES = 4096
+
+
 def _recap_bonds(mol: Chem.Mol) -> List[Tuple[int, int]]:
     """Return every bond in M that RECAP nominates for cleavage.
 
@@ -30,8 +36,28 @@ def _recap_bonds(mol: Chem.Mol) -> List[Tuple[int, int]]:
     bonds: Set[Tuple[int, int]] = set()
     tree = Recap.RecapDecompose(mol)
 
+    # RecapDecompose returns a DAG, not a tree: a fragment reachable by cutting
+    # bonds {a, b} is the same node whether a or b was cut first, so RDKit
+    # shares it between both parents. Walking it as a tree therefore re-expands
+    # every node once per PATH that reaches it, which is exponential in the
+    # number of cut bonds -- and each visit redid a GetSubstructMatches. On
+    # peracetylated polyphenols (very common in COCONUT: many identical
+    # OC(C)=O groups make the DAG maximally shared) this did not terminate.
+    #
+    # A fragment contributes the same cut bonds no matter which path reached it,
+    # so keying on the child SMILES and visiting each distinct node once is
+    # exactly equivalent and collapses the cost to the node count.
+    seen: Set[str] = set()
+
     def walk(node):
+        if len(seen) >= _MAX_RECAP_NODES:
+            return
         for child_smi, child in node.children.items():
+            if child_smi in seen:
+                continue
+            seen.add(child_smi)
+            if len(seen) >= _MAX_RECAP_NODES:
+                return
             try:
                 child_mol = Chem.MolFromSmiles(child_smi)
             except Exception:

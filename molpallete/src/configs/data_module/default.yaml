@@ -7,16 +7,21 @@
 data_module: MolPalleteDataModule
 data_module_kwargs:
   dataset_path:           null
-  dataset_version:        coconut-flavordb_full_v2
-  # macfrag, not naveja_recap. MolPLA's formulation needs k >= 2 R-groups for
-  # the `islinked` bitmask and the core-decoration objective to be
-  # non-degenerate, and naveja_recap with a ratio threshold cannot produce
-  # multi-R-group decompositions at any threshold -- 99.42% of instances have
-  # exactly one R-group at ratio=2/3, and even ratio=1/2 reaches only 0.83%.
-  # The cause is structural (RECAP children are single connected fragments),
-  # so it is not a tuning problem. macfrag measured 8.01 frags/mol at 4.67
-  # heavy atoms, the best multi-cut candidate. See docs/molpallete_design.md
-  # sec.3.1.
+  dataset_version:        coconut-flavordb_v3
+  # naveja_recap, rebuilt on the fragment tree. This comment previously argued
+  # for macfrag because naveja_recap was measured at 99.42% single-R-group and
+  # that was believed structural. It was an implementation artefact: the old
+  # code took RECAP *children* as cores, and a child is one connected fragment,
+  # so M - core is one pendant group at any ratio. Cutting every RECAP bond into
+  # a flat partition and taking connected subtrees as cores fixes it, which is
+  # the remedy MolDAM_prep/HANDOFF_PREPROCESSING.md sec.7 prescribes ("use a
+  # multi-cut decomposer"). Measured at ratio 0.4, max_cores 4:
+  #
+  #             cores/mol   R/dec   k>=2   no_decomp
+  #   before         8.36    1.11    9.5%       0.4%
+  #   after          3.17    2.00   42.5%       1.3%
+  #   MolPLA         3.15       -   52.7%          -
+  #
   decomposition_method:   naveja_recap
   batch_size:             512
   # 32, measured. At batch 512 the GPU consumes 11,317 samples/s (fp32; bf16 is
