@@ -58,18 +58,31 @@ data_module_kwargs:
   #                  molecules that have many cores
   #   molecule       one core drawn per molecule per epoch (MolDAM's idiom)
   sampling_unit:             decomposition
-  # MolPLA's common-R-group filter (paper section 2.1): R-groups at or above this
-  # percentile of the corpus occurrence distribution are "common", and an
-  # instance whose DETACHED R-groups are more than max_common_fraction common is
-  # redrawn. MolPLA used 99.99 / 0.5, taking 1,231,364 (mol, core) tuples down to
-  # 1,054,787 instances.
+  # MolPLA's common-R-group filter (paper section 2.1), instance-side: R-groups at
+  # or above this percentile of the corpus occurrence distribution are "common",
+  # and an instance whose DETACHED R-groups are more than max_common_fraction
+  # common is redrawn. The library is deliberately NOT filtered -- shrinking the
+  # retrieval space makes dropped queries unscoreable rather than harder and
+  # inflates every metric computed against it.
   #
-  # This thins the training signal without touching the retrieval library.
-  # Filtering the library instead removes 67.1% of occurrences at p99.9 and makes
-  # that share of queries unscoreable rather than harder.
+  # MolPLA used 99.99 / 0.5 and kept 85.6% of its tuples. That threshold does not
+  # transfer: this corpus is far more skewed, so the same rule is near-total.
+  # Measured over all 2^k-1 islinked subsets on 12,946 sampled cores:
   #
-  # null = off. The rule degenerates at k=1 -- "more than half of one R-group is
-  # common" means "the R-group is common" -- so on a naveja corpus it rejects far
-  # harder than it did for MolPLA. Measure before setting it.
-  common_percentile:         null
+  #        p   common rows   occ.share   instances kept
+  #    99.0            484       89.4%             3.1%
+  #    99.9             49       78.0%             7.1%
+  #    99.99             5       66.2%            12.0%
+  #    99.999            1       38.1%            42.1%
+  #
+  # 99.999 marks only `*O` common. It still removes the degenerate "predict a
+  # hydroxyl" instances -- the single highest-value removal, since *O alone is
+  # 38.1% of occurrences -- while keeping ~6.2M of 14.75M instances.
+  #
+  # NOTE the root cause is upstream, not here: 42 single-real-atom R-groups carry
+  # 57.3% of all occurrences, because ratio 0.4 makes cores large and leftovers
+  # tiny. Setting min_rgroup_atoms=2 in the decomposer would raise the effective
+  # vocabulary from 46 to 572 structurally, and is the better fix if a rebuild is
+  # affordable. See docs/molpallete_corpus_eda_v3.pdf.
+  common_percentile:         99.999
   max_common_fraction:       0.5
