@@ -35,7 +35,8 @@ assembly:
     #                        the head was rebuilding joints without deciding it --
     #                        for flavour that is the carvone problem.
     node_attrs: [atomic_num, formal_charge, chirality_specified, hybridization,
-                 num_explicit_hs, is_aromatic]
-    edge_attrs: [bond_type, edge_is_aromatic, is_conjugated, bond_stereo]
+                 total_num_hs, is_aromatic, is_in_ring]
+    edge_attrs: [bond_type, edge_is_aromatic, is_conjugated, bond_stereo,
+                 edge_is_in_ring]
     fusion:     concat
     coupling:   false

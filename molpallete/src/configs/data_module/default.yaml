@@ -7,7 +7,7 @@
 data_module: MolPalleteDataModule
 data_module_kwargs:
   dataset_path:           null
-  dataset_version:        coconut-flavordb_v4
+  dataset_version:        coconut-flavordb_v5
   # naveja_recap, rebuilt on the fragment tree. This comment previously argued
   # for macfrag because naveja_recap was measured at 99.42% single-R-group and
   # that was believed structural. It was an implementation artefact: the old
