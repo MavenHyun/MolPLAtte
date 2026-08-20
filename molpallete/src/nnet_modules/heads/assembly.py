@@ -79,7 +79,7 @@ EDGE_ATTR_DIMS: Dict[str, int] = {
 
 #: Defaults recover the atom identity and the bond that forms -- the minimal set
 #: needed to actually attach a retrieved R-group. The rest are opt-in.
-DEFAULT_NODE_ATTRS: List[str] = ["atomic_num", "formal_charge", "num_explicit_hs"]
+DEFAULT_NODE_ATTRS: List[str] = ["atomic_num", "formal_charge", "total_num_hs"]
 DEFAULT_EDGE_ATTRS: List[str] = ["bond_type"]
 
 __all__ = ["AssemblyHead"]

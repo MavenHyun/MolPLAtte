@@ -20,8 +20,9 @@ FEAT2DIM_NODE = {
     "formal_charge":    11,
     "chiral_tag":        9,
     "hybridization":     9,
-    "num_explicit_hs":   9,
+    "total_num_hs":      9,
     "is_aromatic":       2,
+    "is_in_ring":        2,
 }
 
 FEAT2DIM_EDGE = {
@@ -30,6 +31,7 @@ FEAT2DIM_EDGE = {
     "is_conjugated":     2,
     "bond_dir":          7,
     "bond_stereo":       8,
+    "edge_is_in_ring":   2,
 }
 
 

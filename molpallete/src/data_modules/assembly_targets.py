@@ -48,14 +48,16 @@ NODE_ATTR_DIMS: Dict[str, int] = {
     "formal_charge": 11,
     "chirality_specified": 2,
     "hybridization": 9,
-    "num_explicit_hs": 9,
+    "total_num_hs": 9,
     "is_aromatic": 2,
+    "is_in_ring": 2,
 }
 EDGE_ATTR_DIMS: Dict[str, int] = {
     "bond_type": 22,
     "edge_is_aromatic": 2,
     "is_conjugated": 2,
     "bond_stereo": 8,
+    "edge_is_in_ring": 2,
 }
 
 RECOVERABLE_NODE_ATTRS: List[str] = list(NODE_ATTR_DIMS)
@@ -63,7 +65,7 @@ RECOVERABLE_EDGE_ATTRS: List[str] = list(EDGE_ATTR_DIMS)
 
 #: Defaults recover the atom identity and the bond that forms -- the minimal set
 #: needed to actually attach a retrieved R-group. The rest are opt-in.
-DEFAULT_NODE_ATTRS: List[str] = ["atomic_num", "formal_charge", "num_explicit_hs"]
+DEFAULT_NODE_ATTRS: List[str] = ["atomic_num", "formal_charge", "total_num_hs"]
 DEFAULT_EDGE_ATTRS: List[str] = ["bond_type"]
 
 

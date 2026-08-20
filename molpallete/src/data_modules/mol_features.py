@@ -44,23 +44,36 @@ RDKIT_FEATURES = {
     "formal_charge":   [-5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 5],
     "chiral_tag":      list(Chem.rdchem.ChiralType.names.values()),
     "hybridization":   list(Chem.rdchem.HybridizationType.names.values()),
-    "num_explicit_hs": [0, 1, 2, 3, 4, 5, 6, 7, 8],
+    # GetTotalNumHs, not GetNumExplicitHs. The latter counts only hydrogens
+    # written explicitly in the SMILES ([nH]), which is 94% zeros -- entropy
+    # 0.23 against 1.22 for the total. MolPLA/MolDAM both carry the explicit
+    # count, so the encoder effectively had no hydrogen information.
+    # Reconstruction is unaffected: pyg_to_mol feeds this to SetNumExplicitHs,
+    # and RDKit only adds implicit Hs up to the default valence, so setting
+    # explicit = total saturates to the same molecule. Verified on 2,500
+    # molecules and on [nH]/charged subsets: 99.96% round-trip either way.
+    "total_num_hs":    [0, 1, 2, 3, 4, 5, 6, 7, 8],
     "is_aromatic":     [False, True],
+    # Ring membership is NOT recoverable by message passing (cycle detection
+    # needs more than 3-5 hops), unlike degree which a GNN can count from the
+    # adjacency. Both OGB and PyG carry it. 62/38 split, entropy 0.66.
+    "is_in_ring":      [False, True],
     # ---- edge attributes ----
     "bond_type":        list(Chem.rdchem.BondType.names.values()),
     "edge_is_aromatic": [False, True],
     "is_conjugated":    [False, True],
     "bond_dir":         list(Chem.rdchem.BondDir.names.values()),
     "bond_stereo":      list(Chem.rdchem.BondStereo.names.values()),
+    "edge_is_in_ring":  [False, True],
 }
 
 # Reserve the index past the last valid one as the "MASK" for that attribute.
 MASK_VALUES = {k: len(v) for k, v in RDKIT_FEATURES.items()}
 
 NODE_ATTRS = ["atomic_num", "formal_charge", "chiral_tag",
-              "hybridization", "num_explicit_hs", "is_aromatic"]
+              "hybridization", "total_num_hs", "is_aromatic", "is_in_ring"]
 EDGE_ATTRS = ["bond_type", "edge_is_aromatic", "is_conjugated",
-              "bond_dir", "bond_stereo"]
+              "bond_dir", "bond_stereo", "edge_is_in_ring"]
 
 
 def _idx(name: str, value) -> int:
@@ -97,8 +110,9 @@ def mol_to_pyg(mol: Chem.Mol, linker_atoms: Optional[Iterable[int]] = None) -> D
     formal_charge   = []
     chiral_tag      = []
     hybridization   = []
-    num_explicit_hs = []
+    total_num_hs    = []
     is_aromatic     = []
+    is_in_ring      = []
     is_linker_node  = []
 
     for atom in mol.GetAtoms():
@@ -106,8 +120,9 @@ def mol_to_pyg(mol: Chem.Mol, linker_atoms: Optional[Iterable[int]] = None) -> D
         formal_charge.append(_idx("formal_charge", atom.GetFormalCharge()))
         chiral_tag.append(_idx("chiral_tag", atom.GetChiralTag()))
         hybridization.append(_idx("hybridization", atom.GetHybridization()))
-        num_explicit_hs.append(_idx("num_explicit_hs", atom.GetNumExplicitHs()))
+        total_num_hs.append(_idx("total_num_hs", atom.GetTotalNumHs()))
         is_aromatic.append(_idx("is_aromatic", atom.GetIsAromatic()))
+        is_in_ring.append(_idx("is_in_ring", atom.IsInRing()))
         is_linker_node.append(atom.GetIdx() in linker_set)
 
     # ---------------- edge tensors (undirected -> stored bidirectional) ----------------
@@ -118,6 +133,7 @@ def mol_to_pyg(mol: Chem.Mol, linker_atoms: Optional[Iterable[int]] = None) -> D
     edge_is_linker   = []
     bond_dir         = []
     bond_stereo      = []
+    edge_is_in_ring  = []
 
     for bond in mol.GetBonds():
         i, j = bond.GetBeginAtomIdx(), bond.GetEndAtomIdx()
@@ -126,6 +142,7 @@ def mol_to_pyg(mol: Chem.Mol, linker_atoms: Optional[Iterable[int]] = None) -> D
         icj  = _idx("is_conjugated", bond.GetIsConjugated())
         bdr  = _idx("bond_dir", bond.GetBondDir())
         bst  = _idx("bond_stereo", bond.GetStereo())
+        bir  = _idx("edge_is_in_ring", bond.IsInRing())
         link = (i in linker_set) or (j in linker_set)
         for u, v in ((i, j), (j, i)):
             src.append(u); dst.append(v)
@@ -135,13 +152,14 @@ def mol_to_pyg(mol: Chem.Mol, linker_atoms: Optional[Iterable[int]] = None) -> D
             edge_is_linker.append(link)
             bond_dir.append(bdr)
             bond_stereo.append(bst)
+            edge_is_in_ring.append(bir)
 
     n_atoms = mol.GetNumAtoms()
     data = MolPalleteData(
         edge_index=torch.tensor([src, dst], dtype=torch.long),
         num_nodes=n_atoms,
     )
-    # All 11 attributes have vocab sizes ≤128, fit in uint8 (0–255).
+    # All 13 attributes have vocab sizes ≤128, fit in uint8 (0–255).
     # int8 would NOT work — atomic_num's MASK index is 128 which
     # overflows int8's [-128, 127] range and wraps to -128.  Upcast
     # to long only at nn.Embedding lookup time (VanillaGNN.forward).
@@ -149,8 +167,9 @@ def mol_to_pyg(mol: Chem.Mol, linker_atoms: Optional[Iterable[int]] = None) -> D
     data.formal_charge    = torch.tensor(formal_charge,    dtype=torch.uint8)
     data.chiral_tag       = torch.tensor(chiral_tag,       dtype=torch.uint8)
     data.hybridization    = torch.tensor(hybridization,    dtype=torch.uint8)
-    data.num_explicit_hs  = torch.tensor(num_explicit_hs,  dtype=torch.uint8)
+    data.total_num_hs     = torch.tensor(total_num_hs,     dtype=torch.uint8)
     data.is_aromatic      = torch.tensor(is_aromatic,      dtype=torch.uint8)
+    data.is_in_ring       = torch.tensor(is_in_ring,       dtype=torch.uint8)
     data.is_linker        = torch.tensor(is_linker_node,   dtype=torch.bool)
 
     data.bond_type        = torch.tensor(bond_type,        dtype=torch.uint8)
@@ -158,6 +177,7 @@ def mol_to_pyg(mol: Chem.Mol, linker_atoms: Optional[Iterable[int]] = None) -> D
     data.is_conjugated    = torch.tensor(is_conjugated,    dtype=torch.uint8)
     data.bond_dir         = torch.tensor(bond_dir,         dtype=torch.uint8)
     data.bond_stereo      = torch.tensor(bond_stereo,      dtype=torch.uint8)
+    data.edge_is_in_ring  = torch.tensor(edge_is_in_ring,  dtype=torch.uint8)
     data.edge_is_linker   = torch.tensor(edge_is_linker,   dtype=torch.bool)
 
     # linker_id stays long — it's used as a scatter / lookup index.
@@ -198,8 +218,11 @@ def pyg_to_mol(data: Data, sanitize: bool = True) -> Chem.Mol:
         hb_i = int(data.hybridization[i])
         if hb_i != MASK_VALUES["hybridization"]:
             atom.SetHybridization(hyb_table[hb_i])
-        nh_i = int(data.num_explicit_hs[i])
-        if nh_i != MASK_VALUES["num_explicit_hs"]:
+        # total_num_hs -> SetNumExplicitHs is deliberate, see RDKIT_FEATURES.
+        # Ring flags are not restored: RDKit derives ring membership from the
+        # bond graph, so setting them would be redundant and can conflict.
+        nh_i = int(data.total_num_hs[i])
+        if nh_i != MASK_VALUES["total_num_hs"]:
             atom.SetNumExplicitHs(nh_i)
         ar_i = int(data.is_aromatic[i])
         if ar_i != MASK_VALUES["is_aromatic"]:

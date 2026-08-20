@@ -20,7 +20,8 @@ from torch_geometric.data import Data
 #:      bond_dir, bond_stereo, edge_is_linker)
 #: v2: chiral_tag -> chirality_specified; dropped is_conjugated and bond_dir.
 #: v3: dropped hybridization (parent-context leakage; see below).
-HASH_VERSION = 3
+#: v4: num_explicit_hs -> total_num_hs; added is_in_ring / edge_is_in_ring.
+HASH_VERSION = 4
 
 
 def subgraph_hash(data: Data, iterations: int = 3, digest_size: int = 16) -> str:
@@ -30,8 +31,9 @@ def subgraph_hash(data: Data, iterations: int = 3, digest_size: int = 16) -> str
 
     Labels used:
       - Node: (atomic_num, formal_charge, chirality_specified,
-        num_explicit_hs, is_aromatic, is_linker).
-      - Edge: (bond_type, edge_is_aromatic, bond_stereo, edge_is_linker).
+        total_num_hs, is_aromatic, is_in_ring, is_linker).
+      - Edge: (bond_type, edge_is_aromatic, bond_stereo, edge_is_in_ring,
+        edge_is_linker).
 
     Four attributes are deliberately EXCLUDED because they are not
     properties of the isolated sub-graph. Including them splits
@@ -96,7 +98,14 @@ def subgraph_hash(data: Data, iterations: int = 3, digest_size: int = 16) -> str
     structurally identical sub-graphs that carry different joint IDs
     hash to the same key.
 
-    Note that ``num_explicit_hs`` IS retained despite also splitting
+    ``is_in_ring`` is safe to hash despite being computed on the parent: a
+    cut bond is never a ring bond (0 of 15,926 joints measured), so every
+    ring lies wholly inside the core or wholly inside the R-group and the
+    flag is intrinsic to the fragment. The masked linker clone cannot leak
+    it either -- ``mask_linker_atom`` iterates ``NODE_ATTRS``, so new
+    attributes are masked automatically.
+
+    Note that ``total_num_hs`` IS retained despite also splitting
     same-SMILES groups (7 of the top 400): it is genuinely intrinsic,
     and the splitting there reflects the SMILES *label* being lossy
     rather than the hash being wrong.
@@ -121,8 +130,9 @@ def subgraph_hash(data: Data, iterations: int = 3, digest_size: int = 16) -> str
             int(data.atomic_num[i].item()),
             int(data.formal_charge[i].item()),
             int(int(data.chiral_tag[i].item()) != 0),
-            int(data.num_explicit_hs[i].item()),
+            int(data.total_num_hs[i].item()),
             int(data.is_aromatic[i].item()),
+            int(data.is_in_ring[i].item()),
             int(data.is_linker[i].item()),
         )
         G.add_node(i, label=repr(node_label))
@@ -138,6 +148,7 @@ def subgraph_hash(data: Data, iterations: int = 3, digest_size: int = 16) -> str
             int(data.bond_type[e].item()),
             int(data.edge_is_aromatic[e].item()),
             int(data.bond_stereo[e].item()),
+            int(data.edge_is_in_ring[e].item()),
             int(data.edge_is_linker[e].item()),
         )
         G.add_edge(u, v, label=repr(edge_label))
