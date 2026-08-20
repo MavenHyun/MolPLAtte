@@ -60,6 +60,15 @@ __all__ = ["MolPalleteSample", "MolPalleteDataset"]
 #: rsync mid-flight, a killed build).  Mirrors MolDAM's skip loop.
 _MAX_SKIP = 64
 
+#: Separate, much larger budget for indices skipped because the common-R-group
+#: filter rejected them.  These are two different failures and conflating them
+#: crashed a run: consecutive items in the decomposition-unit index are
+#: decompositions of the SAME molecule, so a molecule that only ever cleaves off
+#: common R-groups fails every one of its ~8 entries, and a few such molecules in
+#: a row exhaust a 64-item budget and kill the worker.  A missing file is a
+#: corpus problem worth raising on; a filtered instance is normal operation.
+_MAX_FILTER_SKIP = 4096
+
 
 @dataclass
 class MolPalleteSample:
@@ -165,6 +174,7 @@ class MolPalleteDataset(Dataset):
         self.common_percentile = common_percentile
         self.max_common_fraction = max_common_fraction
         self._common: set = set()
+        self._warned_filter_fallback = False
         if common_percentile is not None:
             self._common = self._load_common(common_percentile)
         self._mol_of_item = None
@@ -230,7 +240,8 @@ class MolPalleteDataset(Dataset):
 
     def __getitem__(self, index: int) -> MolPalleteSample:
         n = len(self)
-        for step in range(_MAX_SKIP):
+        budget = _MAX_FILTER_SKIP if self._common else _MAX_SKIP
+        for step in range(budget):
             item = (index + step) % n
             if self.sampling_unit == "decomposition":
                 mol_i = int(self._mol_of_item[item])
@@ -243,12 +254,40 @@ class MolPalleteDataset(Dataset):
             sample = self._to_sample(record, dec_i)
             if sample is not None:
                 return sample
+        # Exhausted. If the filter is on, it is the likely cause, and refusing
+        # to return anything would abort training over a sampling preference --
+        # so fall back to an unfiltered instance and say so, once.
+        if self._common:
+            if not self._warned_filter_fallback:
+                self._warned_filter_fallback = True
+                logging.getLogger(__name__).warning(
+                    "[MolPalleteDataset] common-R-group filter rejected %d "
+                    "consecutive instances near index %d; falling back to "
+                    "unfiltered draws. The filter is too aggressive for this "
+                    "corpus -- at k=1 it reduces to 'drop if the R-group is "
+                    "common', so raise common_percentile or unset it.",
+                    budget, index,
+                )
+            for step in range(_MAX_SKIP):
+                item = (index + step) % n
+                if self.sampling_unit == "decomposition":
+                    mol_i = int(self._mol_of_item[item])
+                    dec_i = int(self._decomp_of_item[item])
+                else:
+                    mol_i, dec_i = item, None
+                record = self._load(mol_i)
+                if record is None:
+                    continue
+                sample = self._to_sample(record, dec_i, apply_filter=False)
+                if sample is not None:
+                    return sample
         raise RuntimeError(
-            f"no usable record within {_MAX_SKIP} indices of {index} in {self.root}"
+            f"no usable record within {budget} indices of {index} in {self.root}"
         )
 
     def _to_sample(self, record: dict,
-                   decomp_index: Optional[int] = None) -> Optional[MolPalleteSample]:
+                   decomp_index: Optional[int] = None,
+                   apply_filter: bool = True) -> Optional[MolPalleteSample]:
         decomps = record["decompositions"]
         chosen_index = decomp_index
         if decomp_index is not None:
@@ -285,9 +324,10 @@ class MolPalleteDataset(Dataset):
         # Redraw a few times: for k >= 2 a different subset may keep enough
         # non-common R-groups, so rejecting the instance outright would discard
         # usable variants.
-        for _ in range(8 if self._common else 1):
+        use_filter = self._common and apply_filter
+        for _ in range(8 if use_filter else 1):
             cand = sample_islinked(n_rg, self._rng)
-            if not self._common:
+            if not use_filter:
                 islinked = cand
                 break
             detached = [i for i, keep in enumerate(cand) if not keep]

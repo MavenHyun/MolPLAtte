@@ -19,7 +19,12 @@ data_module_kwargs:
   # sec.3.1.
   decomposition_method:   naveja_recap
   batch_size:             512
-  num_workers:            8
+  # 32, measured. At batch 512 the GPU consumes 11,317 samples/s (fp32; bf16 is
+  # faster still), while the loader sustains 8,455/s at 16 workers and 16,044/s
+  # at 32 -- 16 leaves the GPU 25% starved, 32 gives 1.42x headroom. Each
+  # __getitem__ does a torch.load + hydrate + detach, and decomposition-unit
+  # sampling reloads a molecule's .pt once per core, so this is I/O-heavy.
+  num_workers:            32
   val_split:              0.05
   test_split:             0.05
   seed:                   42

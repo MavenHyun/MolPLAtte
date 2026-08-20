@@ -135,6 +135,9 @@ def main() -> int:
     ap.add_argument("--corpus", required=True)
     ap.add_argument("--out", required=True)
     ap.add_argument("--sample", type=int, default=6000)
+    ap.add_argument("--common-percentile", type=float, default=None,
+                    help="also report the effect of MolPLA's instance-level "
+                         "common-R-group filter at this percentile")
     ap.add_argument("--vocab", default=None,
                     help="R-group vocabulary (default <corpus>/rgroup_vocab.pkl.gz)")
     a = ap.parse_args()
@@ -325,6 +328,53 @@ def main() -> int:
                      (vocab.entries[h].smiles or h[:18])[:44]] for h in keys]
             _page_table(pdf, "I · Most frequent R-groups",
                         ["count", "share", "SMILES"], rows)
+
+            if a.common_percentile is not None:
+                import gzip as _gz
+                cpath = root / "rgroup_counts.json.gz"
+                if cpath.is_file():
+                    with _gz.open(cpath, "rt") as fh:
+                        cnt = json.load(fh)
+                    arr = np.fromiter(cnt.values(), float, len(cnt))
+                    thr = float(np.percentile(arr, a.common_percentile))
+                    common = {h for h, c in cnt.items() if c >= thr}
+                    share = sum(cnt[h] for h in common) / arr.sum()
+                    kept_sz, drop_sz, rej = [], [], 0
+                    tot_inst = 0
+                    for mid in ids[::step][: a.sample]:
+                        try:
+                            rec = hydrate(torch.load(str(path_for(root, mid, layout)),
+                                                     weights_only=False))
+                        except Exception:
+                            continue
+                        for d in rec["decompositions"]:
+                            hs = d.get("rgroup_hashes") or []
+                            for i_r, r in enumerate(d["rgroups"]):
+                                tot_inst += 1
+                                n_at = len(r["rgroup_atoms"])
+                                if i_r < len(hs) and hs[i_r] in common:
+                                    rej += 1; drop_sz.append(n_at)
+                                else:
+                                    kept_sz.append(n_at)
+                    rows = [
+                        ["percentile", f"{a.common_percentile}"],
+                        ["count threshold", f"{thr:,.0f}"],
+                        ["hashes flagged common", f"{len(common):,} of {len(cnt):,}"],
+                        ["their share of occurrences", f"{share:.1%}"],
+                        ["", ""],
+                        ["single-R-group instances rejected",
+                         f"{rej:,}/{tot_inst:,}  ({rej/max(tot_inst,1):.1%})"],
+                        ["mean R-group size, rejected", f"{np.mean(drop_sz):.2f} atoms"
+                            if drop_sz else "-"],
+                        ["mean R-group size, kept", f"{np.mean(kept_sz):.2f} atoms"
+                            if kept_sz else "-"],
+                    ]
+                    _page_table(pdf, "J · Instance-level common-R-group filter",
+                                ["quantity", "value"], rows,
+                                note="Filters INSTANCES, not the library: the retrieval "
+                                     "target space and its frequency prior are unchanged. "
+                                     "At k=1 the rule reduces to 'drop if the R-group is "
+                                     "common', so rejection is far heavier than MolPLA saw.")
 
     print(f"wrote {a.out}")
     return 0
