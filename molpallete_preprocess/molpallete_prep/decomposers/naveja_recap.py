@@ -102,7 +102,17 @@ def decompose_naveja_recap(mol: Chem.Mol,
         # falls 60.8% -> 36.7% when they always participate. Used only when the
         # RECAP fragment tree yields no core, they rescue the 26% of molecules
         # that would otherwise be dropped without costing k on the rest.
-        cands.extend(find_ring_substituent_cores(mol, ratio))
+        # find_ring_substituent_cores applies no size floor of its own. Without
+        # this filter the fallback silently reintroduces exactly the single-atom
+        # R-groups min_rgroup_atoms exists to remove -- and it fires MORE often
+        # once the floor is on, because the floor empties `cands`. Measured: the
+        # unfiltered fallback put n_atoms=2 R-groups back at 23.5% of all
+        # occurrences while leaving no_decomp unchanged, i.e. the floor appeared
+        # to work and did nothing.
+        cands.extend(
+            d for d in find_ring_substituent_cores(mol, ratio)
+            if all(len(g.rgroup_atoms) >= min_rgroup_atoms for g in d.rgroups)
+        )
 
     by_core = {}
     for d in cands:
