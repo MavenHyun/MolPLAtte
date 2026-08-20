@@ -84,6 +84,7 @@ molpallete_preprocess/
 │   ├── preprocess/writer.py       per-mol .pt layout, atomic __meta__/__manifest__
 │   └── vendor/                    vendored MacFrag and Synt-On — read-only
 ├── docs/corpus_format.md          on-disk record format + verification recipe
+├── generate_eda_report.py         corpus EDA -> PDF (see ../molpallete/docs/)
 ├── pyproject.toml
 ├── requirements.txt
 └── .gitignore

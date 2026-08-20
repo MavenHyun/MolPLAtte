@@ -33,7 +33,9 @@ molpallete_preprocess/       corpus builder      (see its own README)
   scripts/build_all_corpora.sh
   scripts/build_all_vocabs.sh
 molpallete/                  training repo
-  docs/molpallete_design.md    design contract + measured results + open items
+  docs/molpallete_design.md    design contract + open items
+  docs/molpallete_corpus_eda.pdf  corpus statistics (regenerate: generate_eda_report.py)
+  docs/archive/                superseded results, with what changed under them
   src/configs/                 Hydra config groups
   src/data_modules/            four-view dataset + collate
   src/nnet_modules/            encoder + projection heads + composite model
