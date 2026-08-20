@@ -23,8 +23,10 @@ random_seed: 0
 debug_mode: false
 
 data_module_kwargs:
-  dataset_version:        flavordb_full
-  decomposition_method:   macfrag
+  # Inherit dataset_version / decomposition_method from data_module/default.yaml.
+  # These were pinned to flavordb_full/macfrag, a corpus that no longer exists,
+  # so the debug config could not load at all -- and a debug config that cannot
+  # run is worse than none, since it is the thing you reach for to check a build.
   batch_size:             8
   num_workers:            0
   persistent_workers:     false
