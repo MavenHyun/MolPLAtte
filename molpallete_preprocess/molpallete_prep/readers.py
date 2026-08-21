@@ -35,8 +35,11 @@ COCONUT); the flag exists precisely because that trade-off is a judgement call.
 from __future__ import annotations
 
 import csv
+import io
+import logging
 import os
 import sys
+import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, Iterable, Iterator, Optional, Set, Tuple
@@ -157,11 +160,101 @@ def read_flavordb(
                 return
 
 
+#: Fields lifted from the COCONUT CSV export onto each record's ``meta``.
+#: Deliberately a subset: the export has 44 columns and ~739K rows, so keeping
+#: all of them would cost roughly a gigabyte of resident dict for information
+#: no downstream step reads. ``organisms``/``dois``/``synonyms`` are excluded
+#: for the same reason -- they are long free-text and by far the largest
+#: columns. Add a field here if something needs it.
+COCONUT_META_FIELDS: Tuple[str, ...] = (
+    "name",
+    "standard_inchi_key",
+    "molecular_formula",
+    "chemical_super_class",
+    "chemical_class",
+    "chemical_sub_class",
+    "np_classifier_pathway",
+    "np_classifier_superclass",
+    "np_classifier_class",
+    "np_likeness",
+    "annotation_level",
+)
+
+
+def _coconut_metadata(csv_path: Optional[Path]) -> Dict[str, Dict[str, str]]:
+    """``base identifier -> {field: value}`` from the COCONUT CSV export.
+
+    The 3D SDF export ships exactly one property per record (``IDENTIFIER``),
+    so a corpus built from it alone carries no name, no formula and no chemical
+    class. The CSV export of the same release has 44 columns; joining it back
+    on the identifier recovers that without re-deriving anything.
+
+    Accepts either the ``.zip`` as downloaded or an unpacked ``.csv``. Returns
+    ``{}`` when the file is absent, so the SDF remains usable on its own.
+
+    Keys are the BASE identifier (``CNP0252853``, not ``CNP0252853.1``) to match
+    what :func:`read_coconut` yields under ``dedup_variants``. Where several
+    variants of one compound appear, the first wins -- they are conformer and
+    stereo variants of the same structure, so the metadata is identical.
+    """
+    if csv_path is None or not Path(csv_path).exists():
+        return {}
+    csv_path = Path(csv_path)
+
+    # The export has fields far larger than csv's 128K default (InChI strings,
+    # organism lists), which raises rather than truncating.
+    try:
+        csv.field_size_limit(sys.maxsize)
+    except (OverflowError, ValueError):          # 32-bit platforms
+        csv.field_size_limit(2 ** 31 - 1)
+
+    def _rows(handle):
+        reader = csv.DictReader(handle)
+        for row in reader:
+            yield row
+
+    out: Dict[str, Dict[str, str]] = {}
+    try:
+        if csv_path.suffix == ".zip":
+            with zipfile.ZipFile(csv_path) as zf:
+                names = [n for n in zf.namelist() if n.lower().endswith(".csv")]
+                if not names:
+                    return {}
+                with zf.open(names[0]) as fh:
+                    stream = io.TextIOWrapper(fh, encoding="utf-8", errors="replace")
+                    for row in _rows(stream):
+                        _absorb(out, row)
+        else:
+            with csv_path.open(newline="", encoding="utf-8", errors="replace") as fh:
+                for row in _rows(fh):
+                    _absorb(out, row)
+    except (OSError, csv.Error, zipfile.BadZipFile):
+        # Metadata is an enrichment, never a prerequisite: a truncated or
+        # corrupt export must not stop a corpus build.
+        return out
+    return out
+
+
+def _absorb(out: Dict[str, Dict[str, str]], row: Dict[str, str]) -> None:
+    ident = (row.get("identifier") or "").strip()
+    if not ident:
+        return
+    base = ident.split(".")[0]
+    if base in out:
+        return
+    out[base] = {
+        f: v.strip()
+        for f in COCONUT_META_FIELDS
+        if (v := (row.get(f) or "")).strip()
+    }
+
+
 def read_coconut(
     path: str | Path,
     size_filter: Optional[SizeFilter] = None,
     limit: Optional[int] = None,
     dedup_variants: bool = True,
+    metadata_csv: Optional[str | Path] = None,
 ) -> Iterator[SourceRecord]:
     """Stream COCONUT, recomputing SMILES from each 3D molblock.
 
@@ -173,6 +266,12 @@ def read_coconut(
         keeping them all would triple-count 250K compounds in the R-group
         statistics.  Kept as a flag because a stereo-aware study might want them.
 
+    metadata_csv
+        COCONUT CSV export (``.zip`` or ``.csv``) of the SAME release, joined on
+        identifier to attach name, formula and chemical class. Defaults to
+        ``coconut_csv-<release>.zip`` beside the SDF; pass ``False``-y to skip.
+        Absent file is not an error -- the SDF alone still builds.
+
     Yields ``mol_id = "CNP..."`` (the base identifier).
     """
     path = Path(path)
@@ -182,6 +281,16 @@ def read_coconut(
     sf = size_filter or SizeFilter()
     seen: Set[str] = set()
     emitted = 0
+
+    if metadata_csv is None:
+        guess = path.parent / f"coconut_csv-{path.stem.split('-', 1)[-1]}.zip"
+        metadata_csv = guess if guess.exists() else None
+    meta_by_id = _coconut_metadata(metadata_csv) if metadata_csv else {}
+    if meta_by_id:
+        logging.getLogger(__name__).info(
+            "[read_coconut] joined metadata for %s compounds from %s",
+            f"{len(meta_by_id):,}", Path(metadata_csv).name,
+        )
 
     supplier = Chem.ForwardSDMolSupplier(str(path), removeHs=True, sanitize=True)
     for index, mol in enumerate(supplier):
@@ -206,9 +315,9 @@ def read_coconut(
         if not smiles:
             continue
 
-        yield SourceRecord(
-            base_id, smiles, "coconut", {"identifier": identifier}
-        )
+        meta = {"identifier": identifier}
+        meta.update(meta_by_id.get(base_id, {}))
+        yield SourceRecord(base_id, smiles, "coconut", meta)
         emitted += 1
         if limit is not None and emitted >= limit:
             return
