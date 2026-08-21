@@ -132,7 +132,6 @@ def partition_to_decompositions(
         ``islinked`` subset space is ``2**k - 1``, so this bounds sampling cost.
     max_subsets
         Ceiling on enumerated connected subsets (runaway guard).
-
     Returns
     -------
     list of Decomposition
@@ -154,10 +153,28 @@ def partition_to_decompositions(
     frag_atoms = [set(f.atoms_in_M) for f in partition.fragments]
     threshold = max(ratio * n_atoms, float(min_core_atoms))
 
+    # NOT DONE: absorbing an undersized boundary component into the core instead
+    # of rejecting the decomposition. It was implemented and measured, and it is
+    # a provable no-op here: `_connected_subsets` already enumerates EVERY
+    # connected subset of the fragment tree, so absorbing simply grows a core
+    # into a subset the enumeration produced independently under its own seed.
+    # Rejection therefore discards nothing -- the absorbed equivalent is already
+    # in `by_core`, which dedupes on core_atoms. Verified on 800 COCONUT
+    # molecules: identical decompositions on all 648 that decompose, zero
+    # differences. (An earlier "coverage improves 3.2% -> 3.0%" reading was
+    # sampling noise between differently-sized probes.)
+    #
+    # The useful finding from that exercise: `min_rgroup_atoms` barely affects
+    # this path at all. 41.5% of RECAP fragments are single-atom, but whatever
+    # the floor rejects here is re-enumerated as a larger core. The floor's real
+    # effect -- and the k>=2 cost that comes with it -- lands almost entirely on
+    # `find_ring_substituent_cores`, which has no such exhaustive enumeration to
+    # fall back on.
     results: List[Decomposition] = []
     for core in _connected_subsets(adj, n_frags, max_subsets):
         if len(core) == n_frags:
             continue  # a core spanning every fragment leaves no R-group
+
         core_atoms = set().union(*(frag_atoms[i] for i in core))
         if len(core_atoms) < threshold:
             continue
