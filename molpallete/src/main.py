@@ -217,9 +217,12 @@ def get_callbacks(config: DictConfig, ckpt_path: Path) -> List[pl.Callback]:
         FAISSRetrieval(enable_after_epoch=3,
                        popularity_correction=not _logq_enabled(config),
                        temperature=_retrieval_temperature(config)),
-        # MolDAM's MolecularReassembly callback is intentionally absent:
-        # MolPallete has no assembly objective (MolPLA's three losses are all
-        # contrastive), so there is nothing for it to score.
+        # MolDAM's MolecularReassembly callback is still absent, but the reason
+        # has changed: MolPallete DOES have an assembly objective now
+        # (assembly.enabled), so there is something to score. Reassembly is
+        # scored out-of-band by evaluate_reassembly.py against a checkpoint
+        # rather than per-epoch, because rebuilding molecules with RDKit on
+        # every validation pass is far too slow to sit in the training loop.
         PredictionTable(k=5, max_rows=500, log_every_n_epochs=1,
                         enable_after_epoch=3, out_dir=table_dir,
                         monitor=ckpt_monitor, mode=ckpt_mode),
@@ -299,6 +302,91 @@ def train(config: DictConfig) -> None:
 
 
 def test(config: DictConfig) -> None:
-    """Placeholder -- wire in once a checkpointed model exists."""
-    logging.info("[stub] test() not yet implemented")
-    return
+    """Evaluate a trained checkpoint on the held-out test split.
+
+    Mirrors ``train`` up to the Lightning wrapper, then loads weights and runs
+    a single test pass. The split is the same deterministic 5% that ``train``
+    never touches -- ``DataModuleConfig.seed`` drives the partition, so a test
+    run must use the SAME seed as the run that produced the checkpoint or it
+    will score on molecules that were trained on.
+
+    ``checkpoint_path`` defaults to the file ``SaveBestModelCheckpoint`` writes
+    for this ``experiment_name``. Those are plain ``state_dict`` files, not
+    Lightning checkpoints, so they are loaded directly rather than through
+    ``load_from_checkpoint``.
+    """
+    logging.info(f"STARTED =====> Initializing Configuration  "
+                 f"[seed={config.random_seed}]")
+    config, base_path, ckpt_path = get_init_config(config)
+    logging.info(f"FINISHED ====> Initializing Configuration")
+
+    data_module = get_data_module(config, base_path)
+    nnet_module = get_nnet_module(config)
+    loss_module = get_loss_module(config, nnet_module)
+    lightning_module = get_lightning_module(config, loss_module)
+
+    exp_name = config.get("experiment_name") or "molpallete"
+    weights = config.get("checkpoint_path") or (ckpt_path / f"{exp_name}_best.pt")
+    weights = Path(weights)
+    if not weights.is_file():
+        raise FileNotFoundError(
+            f"no checkpoint at {weights}. Train first, or pass "
+            f"checkpoint_path=/path/to/weights.pt"
+        )
+    state = torch.load(weights, map_location="cpu", weights_only=False)
+    if isinstance(state, dict) and "state_dict" in state:
+        state = state["state_dict"]
+
+    # SaveBestModelCheckpoint saves `pl_module.model.state_dict()`, so keys are
+    # `nnet.*`, while the LightningModule's own keys are `model.nnet.*` (it holds
+    # the LossModule as self.model). Loading the former into the latter matches
+    # NOTHING, and with strict=False that is silent: the model stays randomly
+    # initialised and still produces a full set of plausible-looking metrics.
+    # This is not hypothetical -- it produced test/loss 14.29 against val 2.53
+    # and r@1 0.0022 before being caught. Pick the target by inspecting keys.
+    # Resolve the load target by KEY OVERLAP, not by assumed nesting.
+    # SaveBestModelCheckpoint saves `pl_module.model.model` (the nnet), so the
+    # right target is two levels down -- but hard-coding that couples this to a
+    # detail that has already been wrong once, so pick whichever module actually
+    # shares parameter names.
+    candidates = [("lightning_module", lightning_module)]
+    inner = getattr(lightning_module, "model", None)
+    if inner is not None:
+        candidates.append(("lightning_module.model", inner))
+        inner2 = getattr(inner, "model", None)
+        if inner2 is not None:
+            candidates.append(("lightning_module.model.model", inner2))
+    keys = set(state)
+    name, target, overlap = max(
+        ((n, m, len(keys & set(m.state_dict()))) for n, m in candidates),
+        key=lambda c: c[2],
+    )
+    missing, unexpected = target.load_state_dict(state, strict=False)
+
+    loaded = len(state) - len(unexpected)
+    if loaded == 0:
+        raise RuntimeError(
+            f"[test] {weights.name} shares NO parameter names with any of "
+            f"{[n for n, _ in candidates]}; every key would be silently ignored and "
+            f"the model would score as randomly initialised. "
+            f"checkpoint[:3]={list(state)[:3]} "
+            f"module[:3]={list(target.state_dict())[:3]}"
+        )
+    if missing or unexpected:
+        logging.warning(
+            f"[test] partial state_dict match for {weights.name}: "
+            f"{loaded}/{len(state)} tensors loaded, {len(missing)} missing, "
+            f"{len(unexpected)} unexpected. "
+            f"missing[:5]={list(missing)[:5]} unexpected[:5]={list(unexpected)[:5]}"
+        )
+    logging.info(f"[test] loaded {loaded}/{len(state)} tensors from "
+                 f"{weights.name} into {name} ({type(target).__name__})")
+
+    logging.info(f"STARTED =====> Testing on the held-out split")
+    trainer = get_trainer(config, ckpt_path)
+    results = trainer.test(lightning_module, datamodule=data_module)
+    logging.info(f"FINISHED ====> Testing")
+    for r in results or []:
+        for k in sorted(r):
+            logging.info(f"  {k:<44} {r[k]:.6f}")
+    return results

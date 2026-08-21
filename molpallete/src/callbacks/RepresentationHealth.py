@@ -447,6 +447,14 @@ class RepresentationHealth(pl.Callback):
 
     # -- lightning hooks ----------------------------------------------------
 
+    def on_test_epoch_start(self, trainer, pl_module):
+        self.on_validation_epoch_start(trainer, pl_module)
+
+    def on_test_batch_end(self, trainer, pl_module, outputs, batch,
+                          batch_idx, dataloader_idx=0):
+        self.on_validation_batch_end(trainer, pl_module, outputs, batch,
+                                     batch_idx, dataloader_idx)
+
     def on_validation_epoch_start(self, trainer, pl_module):
         self._done_this_epoch = False
 

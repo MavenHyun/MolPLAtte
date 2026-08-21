@@ -75,6 +75,11 @@ class PredictionTable(pl.Callback):
         self._g:    List[torch.Tensor] = []
 
     def _gated(self, trainer) -> bool:
+        # A test pass has no epoch schedule -- current_epoch is 0 for a freshly
+        # constructed trainer loading a bare state_dict, so enable_after_epoch
+        # would gate away the one table the run exists to produce.
+        if trainer.testing:
+            return False
         return trainer.current_epoch < self.enable_after_epoch
 
     def on_validation_batch_end(self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx=0):
@@ -118,6 +123,14 @@ class PredictionTable(pl.Callback):
         self._q.append(q.detach().cpu())
         self._g.append(g.detach().cpu())
 
+    def on_test_epoch_end(self, trainer, pl_module):
+        self.on_validation_epoch_end(trainer, pl_module)
+
+    def on_test_batch_end(self, trainer, pl_module, outputs, batch, batch_idx,
+                          dataloader_idx=0):
+        self.on_validation_batch_end(trainer, pl_module, outputs, batch,
+                                     batch_idx, dataloader_idx)
+
     def on_validation_epoch_end(self, trainer, pl_module):
         log = logging.getLogger(__name__)
         if trainer.sanity_checking or self._gated(trainer):
@@ -131,15 +144,21 @@ class PredictionTable(pl.Callback):
 
         # Only materialise a table when the watched metric improves — keeps a
         # 120-epoch run down to a handful of CSVs instead of one per epoch.
-        current = trainer.callback_metrics.get(self.monitor)
-        if current is None:
+        # On a test pass there is no epoch sequence and nothing to improve on,
+        # so the monitor gate below would drop the only table we want.
+        if trainer.testing:
+            current = None
+        else:
+            current = trainer.callback_metrics.get(self.monitor)
+        if current is None and not trainer.testing:
             log.info(f"[PredictionTable] monitor {self.monitor!r} "
                      f"not in callback_metrics — skipping table this epoch")
             self._reset(); return
-        current = float(current)
-        if not self._is_better(current):
-            self._reset(); return
-        self.best = current
+        if not trainer.testing:
+            current = float(current)
+            if not self._is_better(current):
+                self._reset(); return
+            self.best = current
 
         import faiss
         q = torch.cat(self._q).float().numpy().astype("float32")
@@ -212,8 +231,13 @@ class PredictionTable(pl.Callback):
         out_dir = self._table_dir(trainer)
         out_dir.mkdir(parents=True, exist_ok=True)
         metric_tag = self.monitor.replace("/", "_").replace("@", "at")
-        out_path = (out_dir /
-                    f"epoch_{trainer.current_epoch:03d}_{metric_tag}_{current:.4f}.csv")
+        if trainer.testing:
+            # No monitored value on a test pass, and current_epoch is whatever
+            # the checkpoint left behind -- name it for what it is instead.
+            out_path = out_dir / "test.csv"
+        else:
+            out_path = (out_dir /
+                        f"epoch_{trainer.current_epoch:03d}_{metric_tag}_{current:.4f}.csv")
         try:
             with open(out_path, "w", newline="") as fh:
                 w = csv.writer(fh)

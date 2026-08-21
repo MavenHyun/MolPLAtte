@@ -156,6 +156,11 @@ class RGroupLibraryRetrieval(pl.Callback):
     def _active(self, trainer: "pl.Trainer") -> bool:
         if self._disabled or trainer.sanity_checking:
             return False
+        # A test run is a single pass with no epoch schedule: current_epoch is
+        # whatever the checkpoint left behind, so the every_n/enable_after
+        # gating below is meaningless and would silently skip the evaluation.
+        if trainer.testing:
+            return True
         epoch = trainer.current_epoch
         if epoch < self.enable_after_epoch:
             return False
@@ -167,6 +172,19 @@ class RGroupLibraryRetrieval(pl.Callback):
     def on_validation_epoch_start(self, trainer, pl_module) -> None:
         self._queries.clear()
         self._target_hashes.clear()
+
+    # Test hooks delegate: the body is already stage-aware (`stage = "test" if
+    # trainer.testing else "val"`), it simply was never invoked on a test pass.
+    def on_test_epoch_start(self, trainer, pl_module) -> None:
+        self.on_validation_epoch_start(trainer, pl_module)
+
+    def on_test_batch_end(self, trainer, pl_module, outputs, batch, batch_idx,
+                          dataloader_idx=0) -> None:
+        self.on_validation_batch_end(trainer, pl_module, outputs, batch,
+                                     batch_idx, dataloader_idx)
+
+    def on_test_epoch_end(self, trainer, pl_module) -> None:
+        self.on_validation_epoch_end(trainer, pl_module)
 
     def on_validation_batch_end(
         self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx=0

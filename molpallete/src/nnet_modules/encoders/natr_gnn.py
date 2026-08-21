@@ -7,14 +7,14 @@ Why this maps onto MolPallete cleanly
 ---------------------------------
 NATR treats node attributes as tokens drawn from a global vocabulary T, where
 node v holds a subset T_v. MolPallete already stores six categorical attributes per
-atom, so the vocabulary is every (attribute-type, value) pair -- 174 tokens --
-and every atom holds exactly six of them, one per type. No feature engineering
+atom, so the vocabulary is every (attribute-type, value) pair -- 170 tokens --
+and every atom holds exactly seven of them, one per type. No feature engineering
 is needed; the tokens are already there.
 
 Where the analogy strains
 -------------------------
 The paper's datasets have |T_v| ~ 200 with degree ~19, giving a per-attribute
-influence near 0.5%. MolPallete has |T_v| = 6 and median degree 2, i.e. ~16.7%.
+influence near 0.5%. MolPallete has |T_v| = 7 and median degree 2, i.e. ~14.3%.
 MolPallete also *concatenates* its attribute embeddings through a learned MLP
 rather than summing them, so the uniform-1/|T_v| collapse the paper targets is
 already partly avoided. Expect a smaller effect here than the paper reports.
@@ -24,7 +24,7 @@ much room is left: 1.0 means the fusion collapsed to uniform after all.
 Architecture (Fig. 3)
 ---------------------
     Attribute Encoder   N x [MHSA -> Add&Norm -> FFN -> Add&Norm] over the
-                        174 global attribute tokens. Runs once per forward,
+                        170 global attribute tokens. Runs once per forward,
                         not once per node.
 
     Attribute Decoder   M x [ H = NodeModule(H, A)                  (MPNN)
@@ -32,8 +32,8 @@ Architecture (Fig. 3)
                               G = Norm((1-lam) H + lam O)           (Eq. 10)
                               H = Norm(FFN(G) + G) ]
 
-Because each atom holds exactly six attributes, the decoder's masked attention
-degenerates to a gather: K/V are six tokens per node rather than a 174-wide
+Because each atom holds exactly seven attributes, the decoder's masked attention
+degenerates to a gather: K/V are seven tokens per node rather than a 170-wide
 masked softmax. That makes the cross-attention cheap.
 """
 from __future__ import annotations
