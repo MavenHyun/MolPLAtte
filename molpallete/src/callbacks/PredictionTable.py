@@ -215,7 +215,10 @@ class PredictionTable(pl.Callback):
             pos_rank = ranked.index(chem) + 1 if chem in ranked else ""
             data.append([
                 trainer.current_epoch,
-                f"{current:.6f}",
+                # None on a test pass: there is no monitored validation metric
+                # to record. Writing "" keeps the column present and the CSV
+                # shape stable rather than crashing on a NoneType format.
+                f"{current:.6f}" if current is not None else "",
                 rows_kept[i]["instance_id"],
                 rows_kept[i]["target_hash"],
                 # " | " between retrieved items: kept from MolDAM even though

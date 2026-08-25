@@ -142,9 +142,23 @@ def get_logger(config: DictConfig, ckpt_path: Path) -> Optional[pl.loggers.Logge
     wcfg = config.get("wandb") or {}
     if not wcfg or wcfg.get("project") is None:
         return None
+    # group / job_type / tags are what make a hyperparameter sweep navigable in
+    # the wandb UI: `group` collapses every run of one sweep into a single row
+    # that can be expanded, `job_type` separates screening runs from finals, and
+    # tags carry the axis being varied so runs can be filtered without parsing
+    # names. Without them a 20-run sweep is 20 unrelated rows.
+    tags = wcfg.get("tags")
+    if isinstance(tags, str):
+        tags = [t.strip() for t in tags.split(",") if t.strip()]
+    elif tags is not None:
+        tags = [str(t) for t in tags]
     logger = pl.loggers.WandbLogger(
         project=wcfg.get("project"),
         name=wcfg.get("name"),
+        group=wcfg.get("group"),
+        job_type=wcfg.get("job_type"),
+        tags=tags,
+        notes=wcfg.get("notes"),
         save_dir=wcfg.get("save_dir") or str(ckpt_path),
         log_model=wcfg.get("log_model", False),
     )

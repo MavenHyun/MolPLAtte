@@ -26,14 +26,38 @@ loss_module_kwargs:
     # cosine ANN with no re-ranking. main.py derives FAISSRetrieval's
     # popularity_correction from this flag so training and evaluation cannot
     # disagree about what the similarity means.
-    # FALSE, on MolDAM's evidence (devlog Phase 10). Training-side logQ lost
-    # 14% there (r@10 0.5792 vs 0.6705): q is estimated from batch counts, so it
-    # floors at 1/batch_size while true frequencies reach ~3e-5 -- every rare
-    # chemistry has its rarity understated up to 65x, correcting the head and not
-    # the tail. Their verdict: "Do not adopt logq_correction=True as-is."
-    # The correction belongs at SCORING time instead -- see
-    # callbacks/RGroupLibraryRetrieval.py.
-    logq_correction:         false
+    # TRUE, on MolPallete's own measurement. This was FALSE, inherited from
+    # MolDAM's devlog Phase 10, which measured a 14% loss (r@10 0.5792 vs
+    # 0.6705) and concluded "Do not adopt logq_correction=True as-is". That
+    # verdict does NOT transfer, and importing it untested cost ~3x retrieval
+    # for every run before the sweep.
+    #
+    # Why it differs: the correction's value scales with how skewed the sampling
+    # distribution is. MolDAM's anchored corpus has effective vocabulary 120;
+    # MolPallete's is 889 over 86,385 rows. MolDAM's objection -- that q is
+    # estimated from batch counts and floors at 1/batch_size, understating rare
+    # chemistries -- is answered here by the running Laplace-smoothed estimator
+    # in loss_modules/contrastive.py, which accumulates counts ACROSS batches
+    # and only falls back to the batch-local floor for the first
+    # logq_warmup_batches.
+    #
+    # Measured on coconut-flavordb_v6, held-out test split, hidden_dim 768:
+    #
+    #                        raw hit@1   corrected_hit@1   lift@1
+    #   logq_correction=false   0.1187            0.3467     4.7x
+    #   logq_correction=true    0.3726            0.3605    15.5x
+    #
+    # The gain is concentrated where the sampling bias was worst -- hit@1 on
+    # R-groups occurring <=10 times went 0.2145 -> 0.8261, while the 10k+ head
+    # barely moved (0.0350 -> 0.0418). That is the signature of removing a
+    # frequency bias, not of exploiting one.
+    #
+    # NOTE the metric to read flips with this flag. With logQ off the critic
+    # learns PMI and `corrected_hit@K` (scoring-time re-rank) is the honest
+    # number; with logQ on the critic learns the posterior directly, so the
+    # re-rank double-counts log p(k) and `corrected_hit@1` (0.3605) comes in
+    # BELOW raw `hit@1` (0.3726). Read raw hit@K when this is true.
+    logq_correction:         true
     # A single R-group hash can appear several times within one batch. Treat
     # every row sharing the target hash as a positive instead of scoring the
     # duplicates as negatives -- otherwise the loss is actively penalised for
