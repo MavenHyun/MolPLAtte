@@ -143,9 +143,24 @@ def ask(model: str, items: Sequence[dict], key: str) -> Dict[str, dict]:
         ],
     }
     resp = _post(payload, key)
+    # A response can be malformed in three distinct ways, and all three must
+    # degrade to "no annotation" rather than raise -- a 163K-call run cannot
+    # abort on one bad reply. They are counted, not swallowed: an endpoint that
+    # fails half its calls has to be VISIBLE. deepseek-v4-pro returned no
+    # `choices` on 99 of 180 benchmark calls and the silent-{} version made that
+    # look like poor abstention rather than a broken endpoint.
+    if isinstance(resp, dict) and resp.get("error"):
+        ask.n_error += 1
+        return {}
     try:
         txt = resp["choices"][0]["message"]["content"]
-    except (KeyError, IndexError):
+    except (KeyError, IndexError, TypeError):
+        ask.n_malformed += 1
+        return {}
+    if txt is None:
+        # Reasoning models emit content=None when the token budget is consumed
+        # by reasoning before any answer is produced.
+        ask.n_empty += 1
         return {}
     txt = txt.strip()
     if txt.startswith("```"):
@@ -168,6 +183,14 @@ def ask(model: str, items: Sequence[dict], key: str) -> Dict[str, dict]:
         out[rid] = {"labels": [x for x in labs if x in VOCAB],
                     "confidence": float(r.get("confidence") or 0.0)}
     return out
+
+
+#: Failure counters. Read them after a run: a healthy endpoint leaves all three
+#: at or near zero, and a large n_empty means max_tokens is being consumed by
+#: reasoning tokens before any content is emitted.
+ask.n_error = 0
+ask.n_malformed = 0
+ask.n_empty = 0
 
 
 # --------------------------------------------------------------------------
