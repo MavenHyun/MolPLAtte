@@ -43,6 +43,18 @@ from typing import Dict, List, Optional, Sequence, Set, Tuple
 
 API = "https://openrouter.ai/api/v1/chat/completions"
 
+#: HTTP codes that no amount of retrying will fix. Each aborts the run with the
+#: server's own message rather than being retried and then silently degraded to
+#: "no annotation" by the caller -- a partial run that looks complete is worse
+#: than a crash.
+_FATAL_HTTP = {
+    400: "malformed request",
+    401: "bad or missing API key",
+    402: "insufficient credits",
+    403: "forbidden / key not permitted for this model",
+    404: "unknown model id",
+}
+
 #: Constrained output vocabulary. FlavorDB's raw set is 715 descriptors with 253
 #: seen exactly once and 67% of the mass on sweet/sweet-like; asking a model to
 #: hit that distribution is asking it to guess a long tail. These are the classes
@@ -111,13 +123,25 @@ def _post(payload: dict, key: str, retries: int = 4) -> dict:
                 return json.loads(r.read())
         except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError) as e:
             code = getattr(e, "code", None)
-            if code in (400, 401, 403):                 # not transient
+            # FAIL FAST, LOUDLY. None of these can be fixed by waiting, and
+            # retrying them wastes four backoff sleeps per call before failing
+            # anyway. 402 is the dangerous one: credit exhaustion halfway
+            # through a 163K-call run would otherwise be retried, then swallowed
+            # by the caller's error handling, leaving a half-empty annotation
+            # file that looks complete. It cost a 500-molecule yield estimate
+            # that read as a 0.60% result when it was really "the credits ran
+            # out at call 160".
+            if code in _FATAL_HTTP:
                 detail = ""
                 try: detail = e.read().decode()[:300]
                 except Exception: pass
-                raise SystemExit(f"OpenRouter rejected the request ({code}): {detail}")
+                raise SystemExit(
+                    f"OpenRouter {code} ({_FATAL_HTTP[code]}) -- aborting rather "
+                    f"than retrying, this cannot be fixed by waiting.\n  {detail}"
+                )
             if attempt == retries - 1:
                 raise
+            # 408/429/5xx are genuinely transient; back off and retry.
             time.sleep(2 ** attempt * 3)
     raise RuntimeError("unreachable")
 
