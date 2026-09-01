@@ -1,4 +1,4 @@
-"""Streaming readers for the MolPallete source corpora.
+"""Streaming readers for the MolPLAtte source corpora.
 
 Two sources, with quite different shapes:
 

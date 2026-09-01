@@ -51,7 +51,7 @@ class FAISSRetrieval(pl.Callback):
             correction: those estimate PMI (``log p(k|q) - log p(k)``), so the
             popularity term has to be added back to recover the posterior that
             r@k rewards. Measured on MolDAM v29a/GINEConv (ZINC anchored):
-            r@10 0.3805 -> 0.6646. MolPallete's corpus and vocabulary differ,
+            r@10 0.3805 -> 0.6646. MolPLAtte's corpus and vocabulary differ,
             so that magnitude does not transfer -- the *mechanism* does, and
             any skewed R-group vocabulary reproduces it.
 
@@ -165,7 +165,7 @@ class FAISSRetrieval(pl.Callback):
         # chemistry is picked its duplicates fill every remaining slot --
         # correct nearest-neighbour behaviour, but it makes r@k collapse onto
         # r@1 and understates r@10. Measured on MolDAM's first_run:
-        # r@10 0.2382 -> 0.3958, r@100 0.2793 -> 0.6109. MolPallete's own skew is
+        # r@10 0.2382 -> 0.3958, r@100 0.2793 -> 0.6109. MolPLAtte's own skew is
         # its own; the failure mode is not.
         #
         # Direction note: only query -> chemistry is well posed. The reverse

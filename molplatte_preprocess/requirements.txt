@@ -1,10 +1,10 @@
-# MolPallete preprocessing dependencies.
+# MolPLAtte preprocessing dependencies.
 # Measured against the `maven` conda env: Python 3.12.13, rdkit 2026.03.2,
 # torch 2.11.0+cu130, torch_geometric 2.7.0.
 
 # --- chemistry -------------------------------------------------------------
 # Upper bound is load-bearing.  Five of the eleven feature tables in
-# molpallete_prep/mol_features.py enumerate an RDKit enum (ChiralType,
+# molplatte_prep/mol_features.py enumerate an RDKit enum (ChiralType,
 # HybridizationType, BondType, BondDir, BondStereo) and store the *index* into
 # that enumeration.  A release that adds or reorders an enum member shifts every
 # index and silently invalidates the embedding indices of an already-built

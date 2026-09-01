@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Build the R-group library vocabulary from a MolPallete corpus.
+"""Build the R-group library vocabulary from a MolPLAtte corpus.
 
 MolPLA's R-Group Retrieval task retrieves against a library of every recommendable
 R-group in the corpus, not against in-batch negatives.  This script builds the
@@ -11,7 +11,7 @@ rebuilt whenever the projector changes.
 Which R-groups are recommendable
 --------------------------------
 Every R-group of every stored decomposition.  MolPLA restricted the library to
-R-groups that appear *detached* in some instance, but in MolPallete every R-group
+R-groups that appear *detached* in some instance, but in MolPLAtte every R-group
 of a decomposition is detached under some ``islinked`` pattern (the subset space is
 all of ``2^k - 1``), so the two definitions coincide.
 
@@ -30,8 +30,8 @@ Example
 ::
 
     python enumerate_rgroups.py \\
-      --corpus /home/mogan/preprocessed/molpallete/flavordb_full/macfrag \\
-      --output /home/mogan/preprocessed/molpallete/flavordb_full/macfrag/rgroup_vocab.pkl.gz \\
+      --corpus /home/mogan/preprocessed/molplatte/flavordb_full/macfrag \\
+      --output /home/mogan/preprocessed/molplatte/flavordb_full/macfrag/rgroup_vocab.pkl.gz \\
       --workers 88
 """
 
@@ -72,13 +72,13 @@ RDLogger.DisableLog("rdApp.*")
 #      dehydrating to numpy and pickling+compressing in the worker.
 torch.multiprocessing.set_sharing_strategy("file_system")
 
-from molpallete_prep import __version__
-from molpallete_prep.graph_hash import HASH_VERSION, subgraph_hash
-from molpallete_prep.graph_ops import detach_rgroups_multi
-from molpallete_prep.lmdb_store import dehydrate, hydrate
-from molpallete_prep.mol_features import pyg_to_mol
-from molpallete_prep.preprocess import atomic_write_json, path_for
-from molpallete_prep.rgroup_library import (
+from molplatte_prep import __version__
+from molplatte_prep.graph_hash import HASH_VERSION, subgraph_hash
+from molplatte_prep.graph_ops import detach_rgroups_multi
+from molplatte_prep.lmdb_store import dehydrate, hydrate
+from molplatte_prep.mol_features import pyg_to_mol
+from molplatte_prep.preprocess import atomic_write_json, path_for
+from molplatte_prep.rgroup_library import (
     RGroupVocabulary,
     rgroup_smiles,
     save_vocabulary,
@@ -306,7 +306,7 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     elapsed = time.time() - started
     vocab.provenance = {
-        "molpallete_prep_version": __version__,
+        "molplatte_prep_version": __version__,
         "corpus": str(corpus),
         "corpus_method": corpus_meta.get("method"),
         "corpus_source": corpus_meta.get("source"),

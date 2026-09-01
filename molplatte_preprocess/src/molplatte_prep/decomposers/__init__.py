@@ -1,6 +1,6 @@
 """Decomposition method registry.
 
-MolPallete needs every molecule expressed in MolPLA's **anchored star topology**:
+MolPLAtte needs every molecule expressed in MolPLA's **anchored star topology**:
 one core plus *k* R-groups, each R-group joined to the core by exactly one shared
 linker atom.  Two families of decomposers feed that shape:
 
@@ -11,7 +11,7 @@ linker atom.  Two families of decomposers feed that shape:
 - ``bemis_murcko``  — the Murcko scaffold as the core, everything else pendant.
 
 *Multi-cut fragment* methods produce a flat ``FragmentPartition``, which
-:mod:`molpallete_prep.anchored_from_partition` re-frames into anchored stars:
+:mod:`molplatte_prep.anchored_from_partition` re-frames into anchored stars:
 
 - ``macfrag``  — MacFrag (BRICS-like environments + igraph block merging).
 - ``synton``   — Synt-On retrosynthetic disconnections.
@@ -22,7 +22,7 @@ decompositions have k >= 2 — MolPLA's ``islinked`` subset enumeration and the
 core-decoration objective are both degenerate at k = 1.  ``macfrag`` re-framed
 through the fragment tree yields **3.34 R-groups per core with 89.7% at k >= 2**
 and a mean core of 22.5 heavy atoms, closely matching the ~20.8-heavy-atom cores
-MolPLA reports.  See ``../molpallete/docs/molpallete_design.md`` §3.1.
+MolPLA reports.  See ``../molplatte/docs/molplatte_design.md`` §3.1.
 """
 
 from __future__ import annotations

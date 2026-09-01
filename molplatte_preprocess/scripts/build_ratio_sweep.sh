@@ -11,7 +11,7 @@
 # -> 8.34% (1/3), so the effect on decomposition shape is real but modest; the
 # question this sweep answers is what it does to the VOCABULARY.
 set -uo pipefail
-CORPORA="${CORPORA:-/home/mogan/preprocessed/molpallete}"
+CORPORA="${CORPORA:-/home/mogan/preprocessed/molplatte}"
 WORKERS="${WORKERS:-92}"
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO"

@@ -1,4 +1,4 @@
-# MolPallete corpus format
+# MolPLAtte corpus format
 
 What `preprocess_flavor.py` writes, why it writes that and not more, and how to
 check a build before you ship it.
@@ -19,7 +19,7 @@ instance — plus two JSON sidecars at the corpus root:
 └── …                    (bucket names depend on --layout)
 ```
 
-Bucketing is `molpallete_prep.preprocess.path_for(root, mol_id, layout)`:
+Bucketing is `molplatte_prep.preprocess.path_for(root, mol_id, layout)`:
 
 | `--layout` | bucket | buckets | use when |
 |---|---|---:|---|
@@ -36,7 +36,7 @@ readers must resolve paths through `path_for` rather than hardcoding a scheme.
 
 Records are written by `writer.write_record`, which calls `lmdb_store.dehydrate`
 first: every PyG `Data` becomes a plain dict of `numpy.ndarray`. Nothing in the
-pickle carries a `molpallete_prep` class qualname or a torch tensor — the latter
+pickle carries a `molplatte_prep` class qualname or a torch tensor — the latter
 matters because unpickling a torch tensor is not fork-safe under multi-worker
 `DataLoader`s.
 
@@ -75,7 +75,7 @@ can be traced back to its row without re-opening the source.
 
 | key | dtype | shape | meaning |
 |---|---|---|---|
-| `__t` | str | — | `"MolPalleteData_v2"` format marker |
+| `__t` | str | — | `"MolPLAtteData_v2"` format marker |
 | `__num_nodes`, `num_nodes` | int | — | atom count |
 | `edge_index` | int64 | `[2, 2·nBonds]` | bidirectional edge list |
 | `atomic_num`, `formal_charge`, `chiral_tag`, `hybridization`, `num_explicit_hs`, `is_aromatic` | uint8 | `[n]` | the six node feature channels |
@@ -190,7 +190,7 @@ def __getitem__(self, idx):
                           mol_id=rec["mol_id"], decomp_idx=d)
 ```
 
-`build_instance` (`molpallete_prep/molpla_instance.py`) calls
+`build_instance` (`molplatte_prep/molpla_instance.py`) calls
 `detach_rgroups_multi` on the spot and returns `MolPlaInstance(G, P, R, …)` —
 `G` the intact graph with linker flags cleared, `P` the core plus still-attached
 R-groups carrying one masked linker atom per detachment, `R` one graph per
@@ -221,7 +221,7 @@ provenance block:
   "n_decomps": [7, 3, "..."],
   "n_rgroups_per_decomp": [[3, 2, 4, 2, 3, 5, 2], [2, 2, 3], "..."],
 
-  "molpallete_prep_version": "0.1.0",
+  "molplatte_prep_version": "0.1.0",
   "source": "flavordb",
   "method": "macfrag",
   "method_family": "fragment",
@@ -321,9 +321,9 @@ level 3 is only needed after an RDKit bump.
 python - <<'PY'
 import json
 from pathlib import Path
-from molpallete_prep.preprocess import path_for
+from molplatte_prep.preprocess import path_for
 
-root = Path("~/preprocessed/molpallete/flavordb/macfrag").expanduser()
+root = Path("~/preprocessed/molplatte/flavordb/macfrag").expanduser()
 meta = json.loads((root / "__meta__.json").read_text())
 n = meta["n_records"]
 
@@ -360,9 +360,9 @@ from the prior `__meta__.json` intersected with what is actually on disk.
 python - <<'PY'
 import json, random, torch
 from pathlib import Path
-from molpallete_prep.preprocess import path_for
+from molplatte_prep.preprocess import path_for
 
-root = Path("~/preprocessed/molpallete/flavordb/macfrag").expanduser()
+root = Path("~/preprocessed/molplatte/flavordb/macfrag").expanduser()
 meta = json.loads((root / "__meta__.json").read_text())
 dim  = meta["condvec_dim"]
 
@@ -420,10 +420,10 @@ import json, random, torch
 from pathlib import Path
 import rdkit
 from rdkit import Chem
-from molpallete_prep.mol_features import RDKIT_FEATURES, mol_to_pyg, data_to_portable
-from molpallete_prep.preprocess import path_for
+from molplatte_prep.mol_features import RDKIT_FEATURES, mol_to_pyg, data_to_portable
+from molplatte_prep.preprocess import path_for
 
-root = Path("~/preprocessed/molpallete/flavordb/macfrag").expanduser()
+root = Path("~/preprocessed/molplatte/flavordb/macfrag").expanduser()
 meta = json.loads((root / "__meta__.json").read_text())
 print(f"running rdkit {rdkit.__version__}; table sizes now:")
 print({k: len(v) for k, v in RDKIT_FEATURES.items()})
@@ -466,11 +466,11 @@ those move only when an enum actually changes.)
 ```python
 import json, torch
 from pathlib import Path
-from molpallete_prep import build_instance, sample_islinked
-from molpallete_prep.mol_features import portable_to_data
-from molpallete_prep.preprocess import path_for
+from molplatte_prep import build_instance, sample_islinked
+from molplatte_prep.mol_features import portable_to_data
+from molplatte_prep.preprocess import path_for
 
-root = Path("~/preprocessed/molpallete/flavordb/macfrag").expanduser()
+root = Path("~/preprocessed/molplatte/flavordb/macfrag").expanduser()
 meta = json.loads((root / "__meta__.json").read_text())
 
 rec = torch.load(path_for(root, meta["ids"][0], meta["layout"]), weights_only=False)

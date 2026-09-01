@@ -2,7 +2,7 @@
 
 Every decomposer in this package ultimately yields ``Decomposition`` /
 ``RGroupInfo`` objects with the same semantics as the original
-``molpallete_prep.decompose`` (one core, k R-groups, per-R-group linker atoms).
+``molplatte_prep.decompose`` (one core, k R-groups, per-R-group linker atoms).
 
 To keep individual adapters thin we share two converters here:
 

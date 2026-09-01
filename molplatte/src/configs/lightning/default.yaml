@@ -1,6 +1,6 @@
 # @package _global_
 
-lightning_module: MolPalleteLightningModule
+lightning_module: MolPLAtteLightningModule
 lightning_module_kwargs:
   learning_rate:       1.0e-3
   weight_decay:        0.0

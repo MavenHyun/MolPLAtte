@@ -5,7 +5,7 @@ The single-encoder-pass trick
 MolPLA encodes ``G``, ``P`` and every ``R`` with **one** shared encoder in **one**
 forward pass: all three are concatenated into a single graph batch and split
 afterwards by boolean node masks.  That is the trait that makes the framework
-cheap -- one GNN call per step instead of three -- and MolPallete keeps it.
+cheap -- one GNN call per step instead of three -- and MolPLAtte keeps it.
 
 Where MolPLA hand-rolled positional marker lists, this collate emits explicit
 per-graph tensors (``graph_view``, ``graph_sample``) and derives the node masks
@@ -65,9 +65,9 @@ from .assembly_targets import (
     RECOVERABLE_NODE_ATTRS,
     derive_node_target,
 )
-from .dataset import MolPalleteDataset, MolPalleteSample
+from .dataset import MolPLAtteDataset, MolPLAtteSample
 
-__all__ = ["collate_molpallete", "DataModuleConfig", "MolPalleteDataModule"]
+__all__ = ["collate_molplatte", "DataModuleConfig", "MolPLAtteDataModule"]
 
 
 def _linker_positions(graph) -> Dict[int, int]:
@@ -79,7 +79,7 @@ def _linker_positions(graph) -> Dict[int, int]:
     return {int(ids[p]): int(p) for p in positions}
 
 
-def collate_molpallete(batch: List[MolPalleteSample]) -> dict:
+def collate_molplatte(batch: List[MolPLAtteSample]) -> dict:
     """Flatten samples into the four-view batch described in the module docstring."""
     graphs: List[object] = []
     graph_view: List[int] = []
@@ -260,7 +260,7 @@ class DataModuleConfig:
         )
 
 
-class MolPalleteDataModule(pl.LightningDataModule):
+class MolPLAtteDataModule(pl.LightningDataModule):
     """Splits one corpus into train/val/test and serves the four-view batches."""
 
     def __init__(self, **kwargs) -> None:
@@ -272,7 +272,7 @@ class MolPalleteDataModule(pl.LightningDataModule):
     def setup(self, stage: Optional[str] = None) -> None:
         if self._splits is not None:
             return
-        dataset = MolPalleteDataset(
+        dataset = MolPLAtteDataset(
             self.config.dataset_path,
             condvec_dim=self.config.condvec_dim,
             shuffle_condvec=self.config.shuffle_condvec,
@@ -316,7 +316,7 @@ class MolPalleteDataModule(pl.LightningDataModule):
             batch_size=self.config.batch_size,
             shuffle=shuffle,
             num_workers=workers,
-            collate_fn=collate_molpallete,
+            collate_fn=collate_molplatte,
             pin_memory=self.config.pin_memory,
             drop_last=shuffle,
         )

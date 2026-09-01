@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ---------------------------------------------------------------------------
-# MolPallete pretraining launcher.
+# MolPLAtte pretraining launcher.
 #
 # MolPLA's three contrastive objectives over the anchored G/P/R/Q views, on the
 # flavor + natural-product corpus. There is no MolDAM-style baseline to beat
@@ -16,9 +16,10 @@
 # ---------------------------------------------------------------------------
 set -euo pipefail
 
-EXP="${EXP:-molpallete_flavordb_full_macfrag_first_run}"
-REPO="${REPO:-/home/mogan/github/MolPallete/molpallete}"
-LOGDIR="${LOGDIR:-/home/mogan/logs/molpallete}"
+EXP="${EXP:-molplatte_flavordb_full_macfrag_first_run}"
+# derive the repo root from this script's own location: .../molplatte/src/scripts/x.sh
+REPO="${REPO:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+LOGDIR="${LOGDIR:-/home/mogan/logs/molplatte}"
 CONFIG="${CONFIG:-config}"
 OUTDIR="$REPO/outputs/$EXP"
 mkdir -p "$LOGDIR"
@@ -31,7 +32,7 @@ mkdir -p "$LOGDIR"
 # Only export it onward if it is actually non-empty: an exported blank key makes
 # wandb fail with "No API key configured" instead of falling back cleanly.
 [[ -n "${WANDB_API_KEY:-}" ]] && export WANDB_API_KEY
-WANDB_PROJECT="${WANDB_PROJECT:-NoahsFarm_MolPallete}"
+WANDB_PROJECT="${WANDB_PROJECT:-NoahsFarm_MolPLAtte}"
 WANDB_ENTITY="${WANDB_ENTITY:-}"          # optional; or set via `wandb login`
 WANDB_RUN_NAME="$EXP"
 WANDB_LOG_MODEL="${WANDB_LOG_MODEL:-false}"

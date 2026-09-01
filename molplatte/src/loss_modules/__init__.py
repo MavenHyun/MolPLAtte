@@ -5,12 +5,12 @@ from __future__ import annotations
 from .assembly import AssemblyLoss
 from .base import LossModule
 from .contrastive import DualInfoNCE, group_ids_from_keys
-from .molpallete import LossModuleMolPallete
+from .molplatte import LossModuleMolPLAtte
 
 __all__ = [
     "AssemblyLoss",
     "DualInfoNCE",
     "LossModule",
-    "LossModuleMolPallete",
+    "LossModuleMolPLAtte",
     "group_ids_from_keys",
 ]

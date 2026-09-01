@@ -1,4 +1,4 @@
-"""MolPallete — MolPLA's masked graph contrastive learning on flavor chemistry.
+"""MolPLAtte — MolPLA's masked graph contrastive learning on flavor chemistry.
 
 One encoder pass, three objectives
 ----------------------------------
@@ -25,7 +25,7 @@ Reading the outputs (paper equation numbers in brackets):
     R-group retrieval head that drives lead optimization, and it is **per-linker**:
     one query per detached R-group, not one per molecule.  MolDAM replaced this
     with a sum-pooled R-group bag contrasted against a single core, which collapses
-    cardinality; restoring the per-linker form is the point of MolPallete.
+    cardinality; restoring the per-linker form is the point of MolPLAtte.
 
 Stop-gradients
 --------------
@@ -49,13 +49,13 @@ from . import encoders as encoder_registry
 from . import heads as head_registry
 from .heads import projectors as projector_registry
 
-__all__ = ["MolPalleteConfig", "MolPallete"]
+__all__ = ["MolPLAtteConfig", "MolPLAtte"]
 
 _POOLING = {"mean": global_mean_pool, "add": global_add_pool, "sum": global_add_pool}
 
 
 @dataclass
-class MolPalleteConfig:
+class MolPLAtteConfig:
     """Hydra-facing model configuration.
 
     ``__post_init__`` propagates the shared hyperparameters into each head's
@@ -135,13 +135,13 @@ class MolPalleteConfig:
             )
 
 
-class MolPallete(nn.Module):
+class MolPLAtte(nn.Module):
     """The composite model. ``forward`` mutates and returns the batch dict."""
 
     def __init__(self, **kwargs) -> None:
         super().__init__()
-        known = {f.name for f in fields(MolPalleteConfig)}
-        self.config = MolPalleteConfig(**{k: v for k, v in kwargs.items() if k in known})
+        known = {f.name for f in fields(MolPLAtteConfig)}
+        self.config = MolPLAtteConfig(**{k: v for k, v in kwargs.items() if k in known})
         c = self.config
 
         self.nnet = nn.ModuleDict()
@@ -255,7 +255,7 @@ class MolPallete(nn.Module):
             # Exposed for the retrieval callbacks, L2-NORMALISED.
             #
             # MolDAM normalises inside its retrieval head, so every consumer got
-            # unit vectors. MolPallete moved normalisation into the loss
+            # unit vectors. MolPLAtte moved normalisation into the loss
             # (DualInfoNCE normalises internally) and the callbacks inherited the
             # old assumption -- FAISSRetrieval and PredictionTable were ranking by
             # RAW inner product, dominated by vector magnitude. Measured on the

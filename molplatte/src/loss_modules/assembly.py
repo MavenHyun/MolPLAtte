@@ -104,7 +104,7 @@ class AssemblyLoss(nn.Module):
                             but not aromatic.
         ``formal_charge``   NO LONGER degenerate. This previously read "wash()
                             neutralises charges, so a joint atom is always
-                            neutral; measured 1 class". MolPallete passes
+                            neutral; measured 1 class". MolPLAtte passes
                             ``neutralise=False`` (organic acids and quaternary
                             ammonium tastants are chemically load-bearing in
                             flavour), so it now measures 2 classes -- but at

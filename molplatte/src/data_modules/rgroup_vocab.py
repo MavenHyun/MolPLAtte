@@ -1,7 +1,7 @@
 """Training-side view of the R-group library vocabulary.
 
 The vocabulary is built once per corpus by
-``molpallete_preprocess/enumerate_rgroups.py``; this module loads it and serves
+``molplatte_preprocess/enumerate_rgroups.py``; this module loads it and serves
 its graphs in batches so the model can embed them into the retrieval
 co-embedding space.
 

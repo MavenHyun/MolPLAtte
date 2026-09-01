@@ -1,8 +1,8 @@
-# MolPallete
+# MolPLAtte
 
 **A MolPLA variant for flavor compound optimization.**
 
-MolPallete pretrains a graph neural network to understand molecular **cores** and
+MolPLAtte pretrains a graph neural network to understand molecular **cores** and
 **R-groups** in flavor chemistry, so that it can suggest R-group replacements for a
 given core template — lead optimization, applied to taste and aroma rather than to
 drugs.
@@ -19,23 +19,23 @@ It combines three lineages:
   489,395 natural products, in place of MolPLA's drug-like GEOM.
 
 The design contract, every measured number, and the reasoning behind each choice
-live in **[`molpallete/docs/molpallete_design.md`](molpallete/docs/molpallete_design.md)**.
+live in **[`molplatte/docs/molplatte_design.md`](molplatte/docs/molplatte_design.md)**.
 
 ---
 
 ## Repo layout
 
 ```
-molpallete_preprocess/       corpus builder      (see its own README)
-  docs/molpallete_corpus_eda.pdf  corpus statistics (regenerate with generate_eda_report.py)
+molplatte_preprocess/       corpus builder      (see its own README)
+  docs/molplatte_corpus_eda.pdf  corpus statistics (regenerate with generate_eda_report.py)
   generate_eda_report.py       EDA report generator
   preprocess_flavor.py         corpus driver
   enumerate_rgroups.py         R-group library vocabulary builder
-  molpallete_prep/             the package
+  molplatte_prep/             the package
   scripts/build_all_corpora.sh
   scripts/build_all_vocabs.sh
-molpallete/                  training repo
-  docs/molpallete_design.md    design contract + open items
+molplatte/                  training repo
+  docs/molplatte_design.md    design contract + open items
   docs/archive/                superseded results, with what changed under them
   src/configs/                 Hydra config groups
   src/data_modules/            four-view dataset + collate
@@ -48,18 +48,18 @@ molpallete/                  training repo
 
 ---
 
-## What MolPallete changes, and why
+## What MolPLAtte changes, and why
 
 ### 1. It restores MolPLA's per-linker retrieval head
 
 MolDAM replaced MolPLA's per-linker query→R-group contrastive objective with a
 sum-pooled R-group *bag* contrasted against a single core. That collapses
 cardinality — four R-groups pointing the same way become indistinguishable from
-one. MolPallete restores the per-linker form, which is what makes "suggest a
+one. MolPLAtte restores the per-linker form, which is what makes "suggest a
 replacement **at this position**" a well-posed query.
 
 It also restores the `sg_P` / `sg_R` / `sg_Q` stop-gradient toggles, which MolDAM
-dropped. All three MolPallete objectives are contrastive with no negative-free
+dropped. All three MolPLAtte objectives are contrastive with no negative-free
 branch, so these are the only collapse-mitigation lever available.
 
 ### 2. It fixes a decomposition that is degenerate on flavor chemistry
@@ -71,7 +71,7 @@ one instance per core and the core-decoration objective has nothing to decorate.
 This reproduces the same structural failure MolDAM_prep measured on ZINC (99.42%
 single-R-group).
 
-MolPallete's fix is to re-frame multi-cut decompositions as anchored stars. A
+MolPLAtte's fix is to re-frame multi-cut decompositions as anchored stars. A
 partition induces a **fragment tree**; any connected subset of it taken as the core
 leaves one R-group per boundary edge. Enumerating connected subsets above a size
 ratio reproduces MolPLA's "single molecule, multiple putative cores" property:
@@ -87,7 +87,7 @@ ratio reproduces MolPLA's "single molecule, multiple putative cores" property:
 ### 3. It conditions retrieval on flavor chemistry, not bulk thermodynamics
 
 MolPLA conditions R-group retrieval on a functional-group vector computed with
-`thermo`, whose checks are bulk-thermodynamic classes. MolPallete uses 85 RDKit
+`thermo`, whose checks are bulk-thermodynamic classes. MolPLAtte uses 85 RDKit
 `fr_*` counters plus 12 SMARTS patterns central to flavor and aroma —
 pyrazines, pyrroles, di/trisulfides, acetals, isoprene units — for a 97-bit vector.
 A **`pocket` mode** is declared with a fixed interface but ships unfed; it returns
@@ -100,26 +100,26 @@ run shows collapsed retrieval rather than plausible-looking noise.
 
 ```bash
 # 1. Build a corpus (FlavorDB, ~14 s on 88 workers)
-cd molpallete_preprocess
+cd molplatte_preprocess
 python preprocess_flavor.py --source flavordb --method macfrag \
-  --output-path /home/mogan/preprocessed/molpallete/flavordb_full/macfrag --workers 88
+  --output-path /home/mogan/preprocessed/molplatte/flavordb_full/macfrag --workers 88
 
 # ... or build every corpus
-CORPORA=/home/mogan/preprocessed/molpallete ./scripts/build_all_corpora.sh
+CORPORA=/home/mogan/preprocessed/molplatte ./scripts/build_all_corpora.sh
 
 # 2. Build the R-group library vocabulary (the RGR retrieval target space)
-python enumerate_rgroups.py --corpus /home/mogan/preprocessed/molpallete/flavordb_full/macfrag --workers 88
+python enumerate_rgroups.py --corpus /home/mogan/preprocessed/molplatte/flavordb_full/macfrag --workers 88
 
 # 3. Sanity-check the training loop (~40 s, CPU)
-cd ../molpallete/src
+cd ../molplatte/src
 python run.py --config-name config_debug \
   trainer_kwargs.fast_dev_run=1 trainer_kwargs.accelerator=cpu \
-  data_module_kwargs.dataset_path=/home/mogan/preprocessed/molpallete \
+  data_module_kwargs.dataset_path=/home/mogan/preprocessed/molplatte \
   data_module_kwargs.num_workers=0 data_module_kwargs.persistent_workers=false
 
 # 4. Pretrain
 python run.py --config-name config \
-  data_module_kwargs.dataset_path=/home/mogan/preprocessed/molpallete \
+  data_module_kwargs.dataset_path=/home/mogan/preprocessed/molplatte \
   data_module_kwargs.dataset_version=flavordb_full \
   data_module_kwargs.decomposition_method=macfrag \
   trainer_kwargs.accelerator=gpu trainer_kwargs.devices=1 \
@@ -129,8 +129,8 @@ python run.py --config-name config \
 # 5. Export the trained library for lead-optimization queries
 python build_library.py \
   --checkpoint /home/mogan/checkpoints/flavor_macfrag_v1_best.pt \
-  --corpus /home/mogan/preprocessed/molpallete/flavordb_full/macfrag \
-  --config /home/mogan/preprocessed/molpallete/logs/pretrain_v1/.hydra/config.yaml \
+  --corpus /home/mogan/preprocessed/molplatte/flavordb_full/macfrag \
+  --config /home/mogan/preprocessed/molplatte/logs/pretrain_v1/.hydra/config.yaml \
   --output /home/mogan/libraries/flavor_macfrag_v1
 ```
 
@@ -138,7 +138,7 @@ python build_library.py \
 
 MolPLA's retrieval task scores against **every recommendable R-group in the
 corpus**, not against in-batch negatives — that library is the lead-optimization
-task. MolPallete builds it in two halves: a static per-corpus **vocabulary**
+task. MolPLAtte builds it in two halves: a static per-corpus **vocabulary**
 (`enumerate_rgroups.py`), and a **vector library** re-embedded every validation
 epoch because the projector is still training.
 

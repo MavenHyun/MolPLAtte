@@ -9,7 +9,7 @@ inference rather than as a validation metric.
 Two halves, built at different times:
 
 * the **vocabulary** (static, per corpus) — built by
-  ``molpallete_preprocess/enumerate_rgroups.py``;
+  ``molplatte_preprocess/enumerate_rgroups.py``;
 * the **index** (this script) — the vocabulary's graphs embedded with a specific
   checkpoint's R-group projector.
 
@@ -23,7 +23,7 @@ Example
 
     python build_library.py \\
       --checkpoint /home/mogan/checkpoints/flavor_macfrag_v1_best.pt \\
-      --corpus /home/mogan/preprocessed/molpallete/flavordb_full/macfrag \\
+      --corpus /home/mogan/preprocessed/molplatte/flavordb_full/macfrag \\
       --output /home/mogan/libraries/flavor_macfrag_v1
 
 Querying it afterwards::
@@ -52,7 +52,7 @@ import torch
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from data_modules.rgroup_vocab import RGroupLibraryVocab  # noqa: E402
-from nnet_modules import MolPallete  # noqa: E402
+from nnet_modules import MolPLAtte  # noqa: E402
 
 
 def _load_model(checkpoint: Path, config_path: Optional[Path], device: str):
@@ -75,7 +75,7 @@ def _load_model(checkpoint: Path, config_path: Optional[Path], device: str):
     # Tolerate Lightning-prefixed keys if someone points this at a .ckpt.
     state = {k.replace("model.model.", "").replace("module.", ""): v for k, v in state.items()}
 
-    model = MolPallete(**kwargs)
+    model = MolPLAtte(**kwargs)
     missing, unexpected = model.load_state_dict(state, strict=False)
     if missing:
         print(f"[warn] {len(missing)} missing keys, e.g. {missing[:3]}", flush=True)
@@ -120,7 +120,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         print(
             f"ERROR: no R-group vocabulary at {vocab_path}.\n"
             f"Build it first:\n"
-            f"  python ../../molpallete_preprocess/enumerate_rgroups.py "
+            f"  python ../../molplatte_preprocess/enumerate_rgroups.py "
             f"--corpus {corpus}",
             file=sys.stderr,
         )

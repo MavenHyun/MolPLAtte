@@ -8,7 +8,7 @@ from __future__ import annotations
 import gzip, json, pickle, sys
 from pathlib import Path
 
-ROOT = Path("/home/mogan/preprocessed/molpallete")
+ROOT = Path("/home/mogan/preprocessed/molplatte")
 OUT = Path(__file__).resolve().parent.parent / "CORPORA.md"
 
 #: What each corpus is FOR. Anything on disk but absent here is reported as

@@ -9,7 +9,7 @@ Acyclic molecules (no scaffold) and molecules whose scaffold is the
 whole molecule (no detachable side chains) yield no Decomposition.
 
 Renamed entry point ``decompose_bemis_murcko`` (was ``decompose_murcko``
-in the legacy ``molpallete_prep.decomposers.murcko``).
+in the legacy ``molplatte_prep.decomposers.murcko``).
 """
 from __future__ import annotations
 

@@ -45,7 +45,7 @@ from .graph_hash import subgraph_hash  # noqa: F401  (re-exported)
 from .mol_features import (
     EDGE_ATTRS,
     MASK_VALUES,
-    MolPalleteData,
+    MolPLAtteData,
     NODE_ATTRS,
     RDKIT_FEATURES,
 )
@@ -174,7 +174,7 @@ def _extract_subgraph(data: Data, keep_atoms: Sequence[int]
     else:
         new_edge_index = torch.empty((2, 0), dtype=torch.long)
 
-    out = MolPalleteData(edge_index=new_edge_index, num_nodes=n_out)
+    out = MolPLAtteData(edge_index=new_edge_index, num_nodes=n_out)
     for a in NODE_ATTRS:
         out[a] = data[a][keep_tensor].clone()
     out.is_linker = data.is_linker[keep_tensor].clone()
@@ -600,7 +600,7 @@ def attach_rgroup(template_data: Data,
     r_link = r_link_local + n_t
 
     # ---- step 2: concat nodes -------------------------------------------
-    out = MolPalleteData(num_nodes=n_t + n_r)
+    out = MolPLAtteData(num_nodes=n_t + n_r)
     for a in NODE_ATTRS:
         out[a] = torch.cat([template_data[a], rgroup_data[a]])
     out.is_linker = torch.cat([template_data.is_linker, rgroup_data.is_linker])
@@ -767,7 +767,7 @@ def attach_rgroups(template_data: Data,
         raise ValueError("linker_ids must be unique across rgroups")
 
     # ---- concat nodes ----
-    out = MolPalleteData(num_nodes=n_t + sum(n_rs))
+    out = MolPLAtteData(num_nodes=n_t + sum(n_rs))
     for a in NODE_ATTRS:
         out[a] = torch.cat([template_data[a]] + [rg[a] for rg in rgroups])
     out.is_linker = torch.cat([template_data.is_linker] + [rg.is_linker for rg in rgroups])

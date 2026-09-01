@@ -131,8 +131,8 @@ def _post(payload: dict, key: str, retries: int = 4) -> dict:
         API, data=body,
         headers={"Authorization": f"Bearer {key}",
                  "Content-Type": "application/json",
-                 "HTTP-Referer": "https://github.com/MolPallete",
-                 "X-Title": "MolPallete flavor labelling"},
+                 "HTTP-Referer": "https://github.com/MolPLAtte",
+                 "X-Title": "MolPLAtte flavor labelling"},
     )
     for attempt in range(retries):
         try:

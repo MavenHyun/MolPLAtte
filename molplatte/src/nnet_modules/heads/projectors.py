@@ -10,7 +10,7 @@ Two conventions worth stating because MolDAM diverges from both:
 
 *Sharing.*  ``g_theta`` and ``g_kappa`` are each applied to **both** sides of
 their objective -- G and Q share the graph projector, G and (P+R) share the node
-projector.  MolDAM instead gives each side its own projection.  MolPallete shares,
+projector.  MolDAM instead gives each side its own projection.  MolPLAtte shares,
 because an asymmetric projection lets the two branches drift into separate
 subspaces and the contrastive objective can be satisfied without the encoder
 learning anything shared.

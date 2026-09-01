@@ -13,7 +13,7 @@ from rdkit import Chem
 from torch_geometric.data import Data
 
 
-class MolPalleteData(Data):
+class MolPLAtteData(Data):
     """``torch_geometric.data.Data`` subclass that knows how to batch the
     MolPLA-specific attributes correctly.
 
@@ -155,7 +155,7 @@ def mol_to_pyg(mol: Chem.Mol, linker_atoms: Optional[Iterable[int]] = None) -> D
             edge_is_in_ring.append(bir)
 
     n_atoms = mol.GetNumAtoms()
-    data = MolPalleteData(
+    data = MolPLAtteData(
         edge_index=torch.tensor([src, dst], dtype=torch.long),
         num_nodes=n_atoms,
     )
@@ -257,12 +257,15 @@ def pyg_to_mol(data: Data, sanitize: bool = True) -> Chem.Mol:
 
 
 # ---------------------------------------------------------------------------
-# portable serialization — pickle a Data/MolPalleteData as a plain dict so the
-# resulting pickle bytes don't reference ``molpallete_prep.mol_features.MolPalleteData``
+# portable serialization — pickle a Data/MolPLAtteData as a plain dict so the
+# resulting pickle bytes don't reference ``molplatte_prep.mol_features.MolPLAtteData``
 # as a class qualname. The dict only contains tensors + Python primitives,
 # so the pickle is loadable anywhere torch + torch_geometric are available.
 # ---------------------------------------------------------------------------
 
+# WIRE FORMAT -- do NOT rename with the package. These strings are written
+# into every .pt record (~1.6M files across the corpora) and portable_to_data
+# dispatches on them; changing them makes every existing corpus unreadable.
 _PORTABLE_TAG_DATA    = "MolPalleteData"
 _PORTABLE_TAG_DATA_V2 = "MolPalleteData_v2"
 
@@ -282,11 +285,11 @@ def _numpy_to_tensor(x):
 
 
 def data_to_portable(data) -> dict:
-    """Convert a PyG Data / MolPalleteData to a plain dict.
+    """Convert a PyG Data / MolPLAtteData to a plain dict.
 
     Output schema (v2):
 
-    * ``__t``         → the marker ``"MolPalleteData_v2"``.
+    * ``__t``         → the marker ``"MolPLAtteData_v2"``.
     * ``__num_nodes`` → explicit int, so empty / no-edge graphs round-trip.
     * every key in ``data.keys()`` → its value with ``torch.Tensor`` fields
       converted to ``numpy.ndarray``. Numpy round-trips through pickle
@@ -294,7 +297,7 @@ def data_to_portable(data) -> dict:
       is fork-safe under multi-worker DataLoaders.
     * (``linker_metas`` is included as a plain dict if present.)
 
-    Legacy v1 stores (torch.Tensor payloads, ``__t == "MolPalleteData"``) are
+    Legacy v1 stores (torch.Tensor payloads, ``__t == "MolPLAtteData"``) are
     still readable by :func:`portable_to_data`.
     """
     out: dict = {
@@ -312,10 +315,10 @@ def portable_to_data(d: dict, cls=None):
     """Inverse of :func:`data_to_portable`.
 
     Accepts both v1 (torch tensor payload) and v2 (numpy payload) records
-    transparently. ``cls`` defaults to :class:`MolPalleteData`.
+    transparently. ``cls`` defaults to :class:`MolPLAtteData`.
     """
     if cls is None:
-        cls = MolPalleteData
+        cls = MolPLAtteData
     num_nodes = d.get("__num_nodes")
     out = cls()
     for k, v in d.items():

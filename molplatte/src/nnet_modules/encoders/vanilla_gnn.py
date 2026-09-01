@@ -17,7 +17,7 @@ from ..components import (
 )
 
 if TYPE_CHECKING:
-    from data_modules.mol_features import MolPalleteData as MolPalleteDataBatch
+    from data_modules.mol_features import MolPLAtteData as MolPLAtteDataBatch
 
 
 class VanillaGNN(nn.Module):
@@ -75,7 +75,7 @@ class VanillaGNN(nn.Module):
         self.moduledict['graph_conv'] = GraphSequential(*conv_blocks)
 
 
-    def forward(self, batch: "MolPalleteDataBatch") -> "MolPalleteDataBatch":
+    def forward(self, batch: "MolPLAtteDataBatch") -> "MolPLAtteDataBatch":
         # Per-atom / per-bond attributes are stored as int8 on disk to
         # cut LMDB size 6×; nn.Embedding needs long indices, so upcast
         # once per attribute right at the lookup site.

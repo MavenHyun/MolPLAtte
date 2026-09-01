@@ -5,7 +5,7 @@ connected sub-graphs ("fragments") with no privileged "core". Every atom
 of M belongs to exactly one fragment; the bonds of M that cross the
 partition are recorded as :class:`CutBond` instances.
 
-Contrast with :mod:`molpallete_prep.anchored` (Type 1), which represents M as a
+Contrast with :mod:`molplatte_prep.anchored` (Type 1), which represents M as a
 **star-shaped** decomposition: one core hub + k R-group spokes, each
 spoke connecting to the core via exactly one masked linker joint. The
 fragment paradigm relaxes the star constraint, so chain
@@ -157,7 +157,7 @@ def validate_partition(partition: FragmentPartition, n_atoms: int) -> None:
 
 
 # ---------------------------------------------------------------------------
-# portable serialization — same intent as molpallete_prep.mol_features.data_to_portable
+# portable serialization — same intent as molplatte_prep.mol_features.data_to_portable
 # ---------------------------------------------------------------------------
 
 _PORTABLE_TAG_PARTITION = "FragmentPartition"
@@ -165,7 +165,7 @@ _PORTABLE_TAG_PARTITION = "FragmentPartition"
 
 def fragment_partition_to_portable(p: FragmentPartition) -> dict:
     """Serialize a :class:`FragmentPartition` to Python primitives so the
-    pickle bytes don't reference ``molpallete_prep.fragments.data_types`` (or
+    pickle bytes don't reference ``molplatte_prep.fragments.data_types`` (or
     wherever this module lives).
     """
     return {

@@ -1,10 +1,10 @@
-> The purpose of this working directory is to build a code repository for MolPallete, a variant of MolPLA tailored for Flavor Compound Optimization and its preprocessing pipeline.
+> The purpose of this working directory is to build a code repository for MolPLAtte, a variant of MolPLA tailored for Flavor Compound Optimization and its preprocessing pipeline.
 
-### What is MolPallete?
-1. MolPallete is a variant of MolPLA that features an auxiliary pretraining objective related to Lead Optimization (Core Decoration)
-2. MolPallete is specifically trained on flavor compounds.
-3. The condition vector for MolPallete should either protein pocket context or neutral (ligand-only).
-4. MolPallete also shares aspects with MolDAM's anchored paradigm.
+### What is MolPLAtte?
+1. MolPLAtte is a variant of MolPLA that features an auxiliary pretraining objective related to Lead Optimization (Core Decoration)
+2. MolPLAtte is specifically trained on flavor compounds.
+3. The condition vector for MolPLAtte should either protein pocket context or neutral (ligand-only).
+4. MolPLAtte also shares aspects with MolDAM's anchored paradigm.
 
 ### List of Instructions
 
@@ -16,17 +16,17 @@
 
 - READ: `/home/mogan/github/MolDAM_prep` 
 	- Absorb its code-base structure and implementation style.
-	- Apply it by building a new code-base in `/home/mogan/github/MolPallete/molpallete_prep/*`
+	- Apply it by building a new code-base in `/home/mogan/github/MolPLAtte/molplatte_prep/*`
 	- Devise a plan for building pretraining data instances from `~/mogan/datasets/flavordb` and `~/mogan/datasets/coconut`.
 
 - READ: `/home/mogan/github/MolDAM/*`
 	- Absorb its code-base structure and implementation style
-	- Apply it by building a new code-base in `/home/mogan/github/MolPallete/molpallete/*`
+	- Apply it by building a new code-base in `/home/mogan/github/MolPLAtte/molplatte/*`
 		- Only inherit the primary traits of MolPLA, not MoLDAM.
 	- Check whether it is feasible to import MolDAM's assembly head and tokenization head.
 
 - TASK:
-	- Build code repositories for `/home/mogan/github/MolPallete/`
+	- Build code repositories for `/home/mogan/github/MolPLAtte/`
 	- Build a pretraining dataset out of the FlavorDB and Coconut datasets.
 	- Utilize various decomposition algorithms: `naveja`, `macfrag`, `synton`.
 	- The decomposition scheme should be efficient as MoLDAM while the data instance construction should follow MolPLA.

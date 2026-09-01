@@ -1,4 +1,4 @@
-"""MolPallete-specific message-passing layers.
+"""MolPLAtte-specific message-passing layers.
 
 PyG convs that are almost usable but cannot carry a vector-valued ``edge_attr``
 get adapted here rather than being dropped from the backbone menu.
@@ -21,7 +21,7 @@ class EdgeGatedGraphConv(GatedGraphConv):
     .. math::
         m_i = \sum_{j \in N(i)} e_{j,i} \cdot \Theta_l h_j
 
-    MolPallete carries a ``hidden_dim`` bond embedding per edge (five attributes:
+    MolPLAtte carries a ``hidden_dim`` bond embedding per edge (five attributes:
     bond_type, aromaticity, conjugation, direction, stereo), so a scalar
     throws almost all of it away. Instead gate the message elementwise:
 
@@ -31,7 +31,7 @@ class EdgeGatedGraphConv(GatedGraphConv):
     The GRU node update -- the part that makes GGNN distinct from GINE, and
     the reason to want it here -- is inherited untouched.
 
-    ``num_layers`` is the recurrence depth *within* one block. The MolPallete
+    ``num_layers`` is the recurrence depth *within* one block. The MolPLAtte
     encoder stacks ``num_conv`` blocks, so the default of 1 gives one
     propagation step per block with independent weights, matching how every
     other conv in the stack behaves. That departs from canonical GGNN, which

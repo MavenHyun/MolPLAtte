@@ -1,11 +1,11 @@
 """Primitive graph operations for the Type 2 (Fragment Partition) paradigm.
 
-This module mirrors :mod:`molpallete_prep.anchored.graph_ops` but for the
+This module mirrors :mod:`molplatte_prep.anchored.graph_ops` but for the
 **flat partition** paradigm (no privileged "core"). The two operations
 exposed are:
 
 * :func:`detach_fragments` — given M (PyG ``Data``) and a
-  :class:`~molpallete_prep.fragments.data_types.FragmentPartition`, return a
+  :class:`~molplatte_prep.fragments.data_types.FragmentPartition`, return a
   list of PyG ``Data`` objects (one per fragment) each carrying
   masked-clone joints for every incident cut bond.
 * :func:`attach_fragments` — inverse: glue a list of masked-clone
@@ -13,7 +13,7 @@ exposed are:
   ``linker_id``.
 
 The :func:`subgraph_hash` helper is re-exported from
-:mod:`molpallete_prep.anchored.graph_ops` so the same WL hash backs the
+:mod:`molplatte_prep.anchored.graph_ops` so the same WL hash backs the
 **one-vocab** fragments-paradigm vocabulary.
 """
 from __future__ import annotations
@@ -36,7 +36,7 @@ from .graph_ops import (
     mask_linker_atom,
     subgraph_hash,
 )
-from .mol_features import EDGE_ATTRS, MolPalleteData, NODE_ATTRS
+from .mol_features import EDGE_ATTRS, MolPLAtteData, NODE_ATTRS
 from .fragment_types import CutBond, FragmentInfo, FragmentPartition, validate_partition
 
 
@@ -239,7 +239,7 @@ def attach_fragments(fragments: Sequence[Data],
     total_atoms = offsets[-1] + fragments[-1].num_nodes
 
     # ---- 3. build concat tables ------------------------------------------
-    out = MolPalleteData(num_nodes=total_atoms)
+    out = MolPLAtteData(num_nodes=total_atoms)
     for a in NODE_ATTRS:
         out[a] = torch.cat([f[a] for f in fragments])
     out.is_linker = torch.cat([f.is_linker for f in fragments])

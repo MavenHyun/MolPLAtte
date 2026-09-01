@@ -1,7 +1,7 @@
 """Weisfeiler-Lehman sub-graph hash used as vocabulary key.
 
-Lifted out of :mod:`molpallete_prep.anchored.graph_ops` so this ``data_modules``
-package is self-contained (no need to import the full ``molpallete_prep`` package
+Lifted out of :mod:`molplatte_prep.anchored.graph_ops` so this ``data_modules``
+package is self-contained (no need to import the full ``molplatte_prep`` package
 to use the datasets).
 """
 from __future__ import annotations

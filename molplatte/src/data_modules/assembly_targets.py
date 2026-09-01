@@ -7,7 +7,7 @@ actually be bonded onto the core: the joint atom's identity and the bond that
 forms are both unknown.  Recovery predicts them back.
 
 Two attributes are excluded from the recoverable set, for the same reason they
-were removed from the WL hash (see ``molpallete_prep/graph_hash.py``):
+were removed from the WL hash (see ``molplatte_prep/graph_hash.py``):
 
 ``chiral_tag``
     ``CHI_TETRAHEDRAL_CW/CCW`` is defined relative to the atom's neighbour order,

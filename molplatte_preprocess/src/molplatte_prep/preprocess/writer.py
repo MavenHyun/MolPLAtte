@@ -1,4 +1,4 @@
-"""On-disk corpus layout for MolPallete.
+"""On-disk corpus layout for MolPLAtte.
 
 One ``.pt`` per molecule under a sharded directory tree, plus two JSON sidecars:
 
@@ -106,7 +106,7 @@ def write_record(root: Path, mol_id: str, payload: dict, layout: str) -> Path:
     """Dehydrate and persist one molecule record.
 
     ``dehydrate`` converts every PyG ``Data`` to the portable numpy form, so the
-    pickle carries no ``molpallete_prep`` class qualnames and no torch tensors --
+    pickle carries no ``molplatte_prep`` class qualnames and no torch tensors --
     the latter matters because unpickling a torch tensor is not fork-safe under
     multi-worker DataLoaders.
     """

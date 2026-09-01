@@ -1,10 +1,10 @@
-# molpallete_preprocess
+# molplatte_preprocess
 
-Corpus builder for [MolPallete](../molpallete/docs/molpallete_design.md): flavor compounds and
+Corpus builder for [MolPLAtte](../molplatte/docs/molplatte_design.md): flavor compounds and
 natural products → anchored **core + k R-groups** records for MolPLA-style
 masked-linker pretraining.
 
-MolPallete = MolPLA's pretraining objectives + MolDAM's engineering + flavor
+MolPLAtte = MolPLA's pretraining objectives + MolDAM's engineering + flavor
 chemistry. This repo is the *preprocessing* half: it reads FlavorDB / COCONUT
 structures, decomposes each molecule into every anchored core it admits, and
 writes one `.pt` per molecule holding the intact graph plus the bookkeeping for
@@ -22,7 +22,7 @@ happens in the training repo, not here — see
 | **COCONUT** (`coconut_sdf_3d-08-2026.sdf`, 2.3 GB) | 737,343 | **489,395** | `CNP…` | 3D molblocks and nothing else |
 
 Two things about these sources drive the reader code
-(`molpallete_prep/readers.py`):
+(`molplatte_prep/readers.py`):
 
 * **FlavorDB is read from the CSVs, not the SDFs.** `flavordb_3d.sdf` carries no
   SMILES at all and covers only 70.3% of the set. `properties.csv` has isomeric
@@ -53,10 +53,10 @@ the flag exists precisely because that trade-off is a judgement call.
 ## Repo layout
 
 ```
-molpallete_preprocess/
+molplatte_preprocess/
 ├── preprocess_flavor.py           CLI driver: source → per-mol .pt corpus
 ├── scripts/build_all_corpora.sh   batch build of every (source, method) corpus
-├── molpallete_prep/
+├── molplatte_prep/
 │   ├── __init__.py                public surface (re-exports the whole API)
 │   ├── readers.py                 FlavorDB / COCONUT streaming readers, SizeFilter
 │   ├── decompose.py               wash(), Naveja putative cores, ring-aware fallback,
@@ -84,7 +84,7 @@ molpallete_preprocess/
 │   ├── preprocess/writer.py       per-mol .pt layout, atomic __meta__/__manifest__
 │   └── vendor/                    vendored MacFrag and Synt-On — read-only
 ├── docs/corpus_format.md          on-disk record format + verification recipe
-├── generate_eda_report.py         corpus EDA -> docs/molpallete_corpus_eda.pdf
+├── generate_eda_report.py         corpus EDA -> docs/molplatte_corpus_eda.pdf
 ├── pyproject.toml
 ├── requirements.txt
 └── .gitignore
@@ -94,16 +94,16 @@ molpallete_preprocess/
 `dehydrate` is on the hot path (`preprocess/writer.py` calls it on every record);
 the LMDB store itself and the vocabulary builder are **not yet wired into the
 driver** — they are available for a vocabulary/co-occurrence pass that has not
-been run for MolPallete.
+been run for MolPLAtte.
 
 ---
 
 ## Decomposition methods
 
-MolPallete needs every molecule expressed in MolPLA's **anchored star topology**:
+MolPLAtte needs every molecule expressed in MolPLA's **anchored star topology**:
 one core plus *k* R-groups, each joined to the core by exactly one shared linker
 atom. Two families feed that shape, and the registry
-(`molpallete_prep.decomposers`) knows which is which via `family_of(method)`.
+(`molplatte_prep.decomposers`) knows which is which via `family_of(method)`.
 
 **Native anchored** — return `List[Decomposition]` directly:
 
@@ -200,7 +200,7 @@ MolPLA conditions R-group retrieval on a binary functional-group vector of the
 *target* R-group. The paper says `c_R ∈ [0,1]^87`; the released code allocates 88
 and fills it from `thermo.functional_groups`. `thermo` is not a dependency here,
 and its 88 checks are bulk-thermodynamic classes rather than flavor chemistry, so
-`molpallete_prep/condvec.py` defines its own:
+`molplatte_prep/condvec.py` defines its own:
 
 * `--condvec-mode neutral` → **`NeutralCondVec`, 97 binary bits**: 85 RDKit
   `Chem.Fragments.fr_*` counters plus 12 SMARTS patterns central to flavor and
@@ -233,7 +233,7 @@ pip install -r requirements.txt
 Import check:
 
 ```bash
-python -c "from molpallete_prep import list_methods, build_instance; print(list_methods())"
+python -c "from molplatte_prep import list_methods, build_instance; print(list_methods())"
 # ['bemis_murcko', 'macfrag', 'naveja_recap', 'synton']
 ```
 
@@ -252,7 +252,7 @@ The driver is `preprocess_flavor.py` at the repo root.
 python preprocess_flavor.py \
     --source flavordb \
     --source-path ~/datasets/flavordb \
-    --output-path ~/preprocessed/molpallete/flavordb/macfrag \
+    --output-path ~/preprocessed/molplatte/flavordb/macfrag \
     --method macfrag \
     --core-ratio 0.5 --max-cores 10 --max-rgroups 8 \
     --min-heavy-atoms 5 --max-heavy-atoms 50 \
@@ -269,7 +269,7 @@ python preprocess_flavor.py \
 python preprocess_flavor.py \
     --source coconut \
     --source-path ~/datasets/coconut/coconut_sdf_3d-08-2026.sdf \
-    --output-path ~/preprocessed/molpallete/coconut/macfrag \
+    --output-path ~/preprocessed/molplatte/coconut/macfrag \
     --method macfrag \
     --core-ratio 0.5 --max-cores 10 --max-rgroups 8 \
     --min-heavy-atoms 5 --max-heavy-atoms 50 \
@@ -311,9 +311,9 @@ After a build, check the index before shipping it anywhere:
 python - <<'PY'
 import json, random, torch
 from pathlib import Path
-from molpallete_prep.preprocess import path_for
+from molplatte_prep.preprocess import path_for
 
-root = Path("~/preprocessed/molpallete/flavordb/macfrag").expanduser()
+root = Path("~/preprocessed/molplatte/flavordb/macfrag").expanduser()
 meta = json.loads((root / "__meta__.json").read_text())
 
 n = meta["n_records"]
@@ -363,7 +363,7 @@ This repo is adapted from [MolDAM_prep](https://github.com/MavenHyun/MolDAM_prep
 Five things changed, each for a measured reason:
 
 1. **Stereochemistry is preserved by default.** MolDAM_prep calls
-   `wash(remove_stereo=True)`; MolPallete defaults to `--keep-stereo`
+   `wash(remove_stereo=True)`; MolPLAtte defaults to `--keep-stereo`
    (`wash(remove_stereo=False)`). Cis/trans isomerism is chemically load-bearing
    in flavor: **(Z)-3-hexen-1-ol is "cut grass"/green, (E)-3-hexen-1-ol is not** —
    same graph, same formula, different odour. Stripping stereo would merge them
@@ -407,7 +407,7 @@ Not yet built:
 * `PocketCondVec` returns zeros — no pocket source is wired (see above).
 * `core_smiles` is left `""` for the fragment family; computing it costs a SMILES
   round-trip per candidate core and nothing downstream reads it.
-* `vocab.py` / `lmdb_store.py` are carried over intact but no MolPallete
+* `vocab.py` / `lmdb_store.py` are carried over intact but no MolPLAtte
   vocabulary or co-occurrence pass has been run.
 * No FlavorDB or COCONUT corpus has been built at full scale yet; every number in
   this README comes from the 400-molecule FlavorDB benchmark.
@@ -422,11 +422,11 @@ Not yet built:
   Reference implementation: [github.com/dmis-lab/MolPLA](https://github.com/dmis-lab/MolPLA).
 * Diao, Y. *et al.* **MacFrag: segmenting large-scale molecules to obtain diverse
   fragments with high qualities.** *Bioinformatics* **39**(1), btad012 (2023).
-  Vendored at `molpallete_prep/vendor/macfrag.py`; original:
+  Vendored at `molplatte_prep/vendor/macfrag.py`; original:
   [github.com/yydiao1025/MacFrag](https://github.com/yydiao1025/MacFrag).
 * Chuiko, Y. *et al.* **Synt-On:** retrosynthetic SMARTS-rule fragmentation of
   synthesizable chemical space. Vendored at
-  `molpallete_prep/vendor/synton/`.
+  `molplatte_prep/vendor/synton/`.
 * Naveja, J. J. *et al.* **A general approach for retrosynthetic molecular core
   analysis.** *J. Cheminform.* **11**, 61–69 (2019). — the core-size `ratio`
   filter behind `naveja_recap`.

@@ -2,6 +2,6 @@
 
 from __future__ import annotations
 
-from .molpallete import MolPallete, MolPalleteConfig
+from .molplatte import MolPLAtte, MolPLAtteConfig
 
-__all__ = ["MolPallete", "MolPalleteConfig"]
+__all__ = ["MolPLAtte", "MolPLAtteConfig"]

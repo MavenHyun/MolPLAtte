@@ -23,7 +23,7 @@ Two branches, independently switchable:
 
 ``coupling`` (default **off**)
     InfoNCE pairing each core-side joint with its R-group clone.  Off by default
-    because MolPallete's ``linker_contrastive`` loss already couples joints, in
+    because MolPLAtte's ``linker_contrastive`` loss already couples joints, in
     MolPLA's formulation (G-side against P+R summed) rather than MolDAM's
     (P-side against R-side).  Enable it to ablate the two against each other;
     running both is a redundant third linker-level objective.

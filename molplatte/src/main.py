@@ -11,14 +11,14 @@ import torch.nn as nn
 from omegaconf import DictConfig, OmegaConf, open_dict
 
 import data_modules as dm
-from data_modules import MolPalleteDataModule       # noqa: F401  (resolved via getattr)
+from data_modules import MolPLAtteDataModule       # noqa: F401  (resolved via getattr)
 
 import nnet_modules      as nm
 import loss_modules      as lossm
 import lightning_modules as lm
-from nnet_modules      import MolPallete                   # noqa: F401  (resolved via getattr)
-from loss_modules      import LossModuleMolPallete         # noqa: F401  (resolved via getattr)
-from lightning_modules import MolPalleteLightningModule    # noqa: F401  (resolved via getattr)
+from nnet_modules      import MolPLAtte                   # noqa: F401  (resolved via getattr)
+from loss_modules      import LossModuleMolPLAtte         # noqa: F401  (resolved via getattr)
+from lightning_modules import MolPLAtteLightningModule    # noqa: F401  (resolved via getattr)
 
 from callbacks import (
     FAISSRetrieval,
@@ -46,10 +46,10 @@ def get_init_config(config: DictConfig) -> DictConfig:
     _apply_assembly_switch(config)
 
     base_path = Path(config.master_path)
-    # Namespaced under the project, matching preprocessed/molpallete. The flat
+    # Namespaced under the project, matching preprocessed/molplatte. The flat
     # ~/checkpoints was shared with MolDAM (debug_anchored_best.pt lives there),
     # so an unprefixed experiment_name could have collided across projects.
-    ckpt_path = base_path / "checkpoints" / "molpallete"
+    ckpt_path = base_path / "checkpoints" / "molplatte"
     ckpt_path.mkdir(parents=True, exist_ok=True)
 
     return config, base_path, ckpt_path
@@ -105,9 +105,9 @@ def _apply_assembly_switch(config: DictConfig) -> None:
     )
 
 
-def get_data_module(config: DictConfig, base_path: Path) -> MolPalleteDataModule:
+def get_data_module(config: DictConfig, base_path: Path) -> MolPLAtteDataModule:
     if config.data_module_kwargs.get("dataset_path") is None:
-        config.data_module_kwargs.dataset_path = str(base_path / "preprocessed" / "molpallete")
+        config.data_module_kwargs.dataset_path = str(base_path / "preprocessed" / "molplatte")
 
     data_module = getattr(dm, config.data_module)(**config.data_module_kwargs)
     data_module.setup()
@@ -182,7 +182,7 @@ def _logq_enabled(config: DictConfig) -> bool:
     """True when the R-group retrieval loss applies the logQ correction.
 
     Defaults to True to match the loss module's own default. MolDAM gated this
-    on ``decomposition_paradigm``; MolPallete has a single view scheme (MolPLA's
+    on ``decomposition_paradigm``; MolPLAtte has a single view scheme (MolPLA's
     G/P/R/Q views), so the branch is gone and the flag is read directly.
     """
     return bool(_retrieval_loss_kwargs(config).get("logq_correction", True))
@@ -194,7 +194,7 @@ def _retrieval_temperature(config: DictConfig) -> float:
 
 def get_callbacks(config: DictConfig, ckpt_path: Path) -> List[pl.Callback]:
     exp_name = config.get("experiment_name")
-    ckpt_filename = f"{exp_name}_best.pt" if exp_name else "molpallete_best.pt"
+    ckpt_filename = f"{exp_name}_best.pt" if exp_name else "molplatte_best.pt"
     es_cfg = config.get("early_stopping", {}) or {}
     es_patience = int(es_cfg.get("patience", 10))
     es_min_delta = float(es_cfg.get("min_delta", 0.0))
@@ -225,14 +225,14 @@ def get_callbacks(config: DictConfig, ckpt_path: Path) -> List[pl.Callback]:
         # (log p(k|q) - log p(k)) and the popularity term has to be added back
         # at scoring, or r@k underreports badly -- measured on MolDAM
         # v29a/GINEConv, 0.3805 vs 0.6646. That number is MolDAM's ZINC
-        # anchored corpus, not MolPallete's; the *mechanism* carries over
+        # anchored corpus, not MolPLAtte's; the *mechanism* carries over
         # (skewed R-group vocabulary + in-batch InfoNCE), the magnitude does
         # not. Deriving one flag from the other prevents the mismatch either way.
         FAISSRetrieval(enable_after_epoch=3,
                        popularity_correction=not _logq_enabled(config),
                        temperature=_retrieval_temperature(config)),
         # MolDAM's MolecularReassembly callback is still absent, but the reason
-        # has changed: MolPallete DOES have an assembly objective now
+        # has changed: MolPLAtte DOES have an assembly objective now
         # (assembly.enabled), so there is something to score. Reassembly is
         # scored out-of-band by evaluate_reassembly.py against a checkpoint
         # rather than per-epoch, because rebuilding molecules with RDKit on
@@ -294,10 +294,10 @@ def train(config: DictConfig) -> None:
     data_module = get_data_module(config, base_path)
     logging.info(f"FINISHED ====> Initializing Dataset Module")
 
-    logging.info(f"STARTED =====> Initializing MolPallete Module "
+    logging.info(f"STARTED =====> Initializing MolPLAtte Module "
                  f"[{config.nnet_module}]")
     nnet_module = get_nnet_module(config)
-    logging.info(f"FINISHED ====> Initializing MolPallete Module")
+    logging.info(f"FINISHED ====> Initializing MolPLAtte Module")
 
     logging.info(f"STARTED =====> Wrapping Loss Module "
                  f"[{config.loss_module}]")
@@ -339,7 +339,7 @@ def test(config: DictConfig) -> None:
     loss_module = get_loss_module(config, nnet_module)
     lightning_module = get_lightning_module(config, loss_module)
 
-    exp_name = config.get("experiment_name") or "molpallete"
+    exp_name = config.get("experiment_name") or "molplatte"
     weights = config.get("checkpoint_path") or (ckpt_path / f"{exp_name}_best.pt")
     weights = Path(weights)
     if not weights.is_file():

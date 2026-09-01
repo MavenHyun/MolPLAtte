@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from .base import DataModuleConfig, MolPalleteDataModule, collate_molpallete
-from .dataset import MolPalleteDataset, MolPalleteSample
+from .base import DataModuleConfig, MolPLAtteDataModule, collate_molplatte
+from .dataset import MolPLAtteDataset, MolPLAtteSample
 
 __all__ = [
     "DataModuleConfig",
-    "MolPalleteDataModule",
-    "MolPalleteDataset",
-    "MolPalleteSample",
-    "collate_molpallete",
+    "MolPLAtteDataModule",
+    "MolPLAtteDataset",
+    "MolPLAtteSample",
+    "collate_molplatte",
 ]

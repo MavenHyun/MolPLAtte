@@ -34,7 +34,7 @@ def _silence_io():
 
 
 _SYNTHON_LABEL_RE = re.compile(r":\d+")
-# molpallete_prep/decomposers/synton.py -> molpallete_prep/vendor/synton
+# molplatte_prep/decomposers/synton.py -> molplatte_prep/vendor/synton
 _VENDOR_ROOT = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
     "vendor", "synton",

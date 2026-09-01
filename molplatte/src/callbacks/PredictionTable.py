@@ -91,7 +91,7 @@ class PredictionTable(pl.Callback):
         if q is None or g is None or hashes is None:
             return
 
-        # Row identity. MolDAM keyed rows by ZINC id + core hash; MolPallete's
+        # Row identity. MolDAM keyed rows by ZINC id + core hash; MolPLAtte's
         # unit is a *linker*, and there are J of those against B instances, so
         # the row must be mapped back through joint_sample.
         #
@@ -222,7 +222,7 @@ class PredictionTable(pl.Callback):
                 rows_kept[i]["instance_id"],
                 rows_kept[i]["target_hash"],
                 # " | " between retrieved items: kept from MolDAM even though
-                # MolPallete's target_hash is a single hash rather than a
+                # MolPLAtte's target_hash is a single hash rather than a
                 # comma-joined set, so the column stays splittable if a future
                 # variant goes back to sets.
                 " | ".join(rows_kept[j]["instance_id"] for j in nbr),

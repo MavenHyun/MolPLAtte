@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Build the primary MolPallete pretraining corpus: FlavorDB + COCONUT combined.
+# Build the primary MolPLAtte pretraining corpus: FlavorDB + COCONUT combined.
 #
 # This is the corpus the pretraining runs use. The per-source corpora under
 # flavordb_full/ and coconut_full/ remain as the source ablation and the decomposition
 # method comparison; note they predate always-on deduplication.
 set -euo pipefail
 
-CORPORA="${CORPORA:-/home/mogan/preprocessed/molpallete}"
+CORPORA="${CORPORA:-/home/mogan/preprocessed/molplatte}"
 WORKERS="${WORKERS:-88}"
 VERSION="${VERSION:-coconut-flavordb_full}"
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

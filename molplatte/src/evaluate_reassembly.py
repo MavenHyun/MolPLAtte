@@ -43,12 +43,12 @@ from rdkit import Chem, RDLogger
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 RDLogger.DisableLog("rdApp.*")
 
-from data_modules import MolPalleteDataset, collate_molpallete  # noqa: E402
+from data_modules import MolPLAtteDataset, collate_molplatte  # noqa: E402
 from data_modules.molpla_prep_bridge import _ensure_importable  # noqa: E402,F401
-from nnet_modules import MolPallete  # noqa: E402
+from nnet_modules import MolPLAtte  # noqa: E402
 
-from molpallete_prep.graph_ops import attach_rgroups  # noqa: E402
-from molpallete_prep.mol_features import pyg_to_mol  # noqa: E402
+from molplatte_prep.graph_ops import attach_rgroups  # noqa: E402
+from molplatte_prep.mol_features import pyg_to_mol  # noqa: E402
 
 
 def _canonical(data) -> str | None:
@@ -108,7 +108,7 @@ def main(argv=None) -> int:
     args = ap.parse_args(argv)
 
     cfg = OmegaConf.load(args.config)
-    model = MolPallete(**OmegaConf.to_container(cfg.nnet_module_kwargs, resolve=True))
+    model = MolPLAtte(**OmegaConf.to_container(cfg.nnet_module_kwargs, resolve=True))
     state = torch.load(args.checkpoint, map_location="cpu", weights_only=False)
     missing, unexpected = model.load_state_dict(state, strict=False)
     if any("assembly" in k for k in missing):
@@ -117,7 +117,7 @@ def main(argv=None) -> int:
         return 1
     model.to(args.device).eval()
 
-    ds = MolPalleteDataset(args.corpus, condvec_dim=cfg.nnet_module_kwargs.condvec_dim,
+    ds = MolPLAtteDataset(args.corpus, condvec_dim=cfg.nnet_module_kwargs.condvec_dim,
                            need_assembly_targets=True, seed=0)
     counts = collections.Counter()
     n_joints = collections.Counter()
@@ -125,7 +125,7 @@ def main(argv=None) -> int:
     done = 0
     for start in range(0, min(args.n, len(ds)), args.batch_size):
         samples = [ds[i] for i in range(start, min(start + args.batch_size, args.n))]
-        batch = collate_molpallete(samples)
+        batch = collate_molplatte(samples)
         dev = {k: (v.to(args.device) if hasattr(v, "to") else v) for k, v in batch.items()}
         with torch.no_grad():
             out = model(dev)

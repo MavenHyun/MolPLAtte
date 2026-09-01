@@ -15,8 +15,8 @@ Three cost tiers, independently gated:
                     representation. Yields the inter-node dilution factor and
                     the over-squashing decay curve from one computation.
 
-A note on what tier 2 means for MolPallete. The paper assumes h^(0) = sum_t z_t,
-which forces delta^intra(t) = 1/|T_v| uniformly. MolPallete inherits MolDAM's
+A note on what tier 2 means for MolPLAtte. The paper assumes h^(0) = sum_t z_t,
+which forces delta^intra(t) = 1/|T_v| uniformly. MolPLAtte inherits MolDAM's
 VanillaGNN, which concatenates its node-attribute embeddings and learns a
 fusion MLP, so the weights *can* be non-uniform -- but they are static, not
 context-dependent. Tier 2 therefore measures whether the learned fusion
@@ -351,7 +351,7 @@ class RepresentationHealth(pl.Callback):
           eff_rank  -- exp(entropy of normalised singular values) (Roy &
                        Vetterli). Low relative to dim => dimensional collapse.
 
-        MolPallete is *entirely* contrastive -- all three MolPLA losses are
+        MolPLAtte is *entirely* contrastive -- all three MolPLA losses are
         InfoNCE -- and two of its three branches carry a stop-gradient
         (``sg_Q`` defaults on), which is precisely the SimSiam setting where
         collapse is the named failure mode. These are the load-bearing

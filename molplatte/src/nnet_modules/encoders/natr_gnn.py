@@ -1,12 +1,12 @@
-"""Node Attribute Transformer encoder (NATR) for MolPallete.
+"""Node Attribute Transformer encoder (NATR) for MolPLAtte.
 
 Implements Lee et al., "Understanding and Tackling Over-Dilution in Graph
 Neural Networks" (KDD 2025), §4, as a drop-in replacement for ``VanillaGNN``.
 
-Why this maps onto MolPallete cleanly
+Why this maps onto MolPLAtte cleanly
 ---------------------------------
 NATR treats node attributes as tokens drawn from a global vocabulary T, where
-node v holds a subset T_v. MolPallete already stores six categorical attributes per
+node v holds a subset T_v. MolPLAtte already stores six categorical attributes per
 atom, so the vocabulary is every (attribute-type, value) pair -- 170 tokens --
 and every atom holds exactly seven of them, one per type. No feature engineering
 is needed; the tokens are already there.
@@ -14,8 +14,8 @@ is needed; the tokens are already there.
 Where the analogy strains
 -------------------------
 The paper's datasets have |T_v| ~ 200 with degree ~19, giving a per-attribute
-influence near 0.5%. MolPallete has |T_v| = 7 and median degree 2, i.e. ~14.3%.
-MolPallete also *concatenates* its attribute embeddings through a learned MLP
+influence near 0.5%. MolPLAtte has |T_v| = 7 and median degree 2, i.e. ~14.3%.
+MolPLAtte also *concatenates* its attribute embeddings through a learned MLP
 rather than summing them, so the uniform-1/|T_v| collapse the paper targets is
 already partly avoided. Expect a smaller effect here than the paper reports.
 `RepresentationHealth`'s `health/intra_dilution/entropy` measures exactly how
@@ -52,7 +52,7 @@ from ..components import (
 )
 
 if TYPE_CHECKING:
-    from data_modules.mol_features import MolPalleteData as MolPalleteDataBatch
+    from data_modules.mol_features import MolPLAtteData as MolPLAtteDataBatch
 
 
 class NatrGNN(nn.Module):
@@ -72,7 +72,7 @@ class NatrGNN(nn.Module):
         # lambda in Eq. 10: 0 => pure MPNN, 1 => pure attribute readout.
         self.lam                   = float(kwargs.get("natr_lambda", 0.5))
         # "sum" is faithful to the paper (h^(0) = sum_t z_t, the regime NATR's
-        # decoder exists to repair). "mlp" keeps MolPallete's concat+MLP fusion and
+        # decoder exists to repair). "mlp" keeps MolPLAtte's concat+MLP fusion and
         # adds NATR on top -- weaker test of the hypothesis, likely stronger
         # absolute numbers.
         self.initial_fusion        = str(kwargs.get("natr_initial_fusion", "sum"))
@@ -116,7 +116,7 @@ class NatrGNN(nn.Module):
             nn.PReLU(), nn.Dropout(self.dropout_rate),
         )
 
-        # Optional MolPallete-style static fusion for initial_fusion="mlp".
+        # Optional MolPLAtte-style static fusion for initial_fusion="mlp".
         if self.initial_fusion == "mlp":
             node_in  = h * len(FEAT2DIM_NODE)
             node_mid = node_in // 2
@@ -157,7 +157,7 @@ class NatrGNN(nn.Module):
         vals = [batch[nf].long() for nf in FEAT2DIM_NODE]
         return torch.stack(vals, dim=1) + self.attr_offsets
 
-    def forward(self, batch: "MolPalleteDataBatch") -> "MolPalleteDataBatch":
+    def forward(self, batch: "MolPLAtteDataBatch") -> "MolPLAtteDataBatch":
         h = self.hidden_dim
 
         # -- attribute encoder (once per forward, over the whole vocabulary) --

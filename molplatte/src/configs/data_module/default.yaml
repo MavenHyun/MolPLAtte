@@ -1,10 +1,10 @@
 # @package _global_
 
 # ``dataset_path: null`` is filled in by ``main.get_data_module`` as
-# ``{master_path}/preprocessed/molpallete``; DataModuleConfig.__post_init__
+# ``{master_path}/preprocessed/molplatte``; DataModuleConfig.__post_init__
 # then appends ``{dataset_version}/{decomposition_method}``.
 
-data_module: MolPalleteDataModule
+data_module: MolPLAtteDataModule
 data_module_kwargs:
   dataset_path:           null
   dataset_version:        coconut-flavordb-full
@@ -37,7 +37,7 @@ data_module_kwargs:
   pin_memory:             true
   prefetch_factor:        2
   # Condition vector for MolPLA loss #3. `neutral` = ligand-only, 97 RDKit
-  # fragment/SMARTS presence bits (see molpallete_prep/condvec.py). `pocket`
+  # fragment/SMARTS presence bits (see molplatte_prep/condvec.py). `pocket`
   # is a declared interface with a zero-filled implementation, which is
   # deliberately the paper's `Cond. None` ablation -- an unfed pocket run
   # shows up as collapsed retrieval rather than plausible noise.

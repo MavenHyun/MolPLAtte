@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build every MolPallete pretraining corpus.
+# Build every MolPLAtte pretraining corpus.
 #
 # macfrag is the default recipe: naveja_recap -- MolPLA's own method -- collapses
 # to ~1 R-group per decomposition on flavor chemistry, which makes MolPLA's
@@ -7,7 +7,7 @@
 # the comparison the brief asks for.  See README.md for the measured table.
 set -euo pipefail
 
-CORPORA="${CORPORA:-/home/mogan/preprocessed/molpallete}"
+CORPORA="${CORPORA:-/home/mogan/preprocessed/molplatte}"
 WORKERS="${WORKERS:-88}"
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO"

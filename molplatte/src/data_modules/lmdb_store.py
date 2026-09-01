@@ -1,4 +1,4 @@
-"""LMDB-backed store for preprocessed MolPallete corpus.
+"""LMDB-backed store for preprocessed MolPLAtte corpus.
 
 Layout
 ------
@@ -82,9 +82,9 @@ def _record_key(idx: int) -> bytes:
 
 
 # ---------------------------------------------------------------------------
-# portable (de)hydration — keep ``molpallete.*`` class qualnames out of the
+# portable (de)hydration — keep ``molplatte.*`` class qualnames out of the
 # pickle bytes so the LMDB records can be loaded anywhere torch +
-# torch_geometric are installed, with no molpallete package required.
+# torch_geometric are installed, with no molplatte package required.
 # ---------------------------------------------------------------------------
 
 _HELPERS_CACHE = None
@@ -94,8 +94,8 @@ def _import_helpers():
     """Resolve the (de)hydration helpers from whichever layout this
     module is sitting in:
 
-    * source-dev/molpallete/data_modules/  → data_types.py is a sibling
-    * MolPallete_prep/molpallete/              → data_types lives in fragments/
+    * source-dev/molplatte/data_modules/  → data_types.py is a sibling
+    * MolPLAtte_prep/molplatte/              → data_types lives in fragments/
 
     Cached after first call — dehydrate/hydrate recurse per key, so a
     fresh import lookup per call cost tens of ms per record.
@@ -104,7 +104,7 @@ def _import_helpers():
     if _HELPERS_CACHE is not None:
         return _HELPERS_CACHE
     from .mol_features import (
-        MolPalleteData, data_to_portable, portable_to_data, is_portable_data,
+        MolPLAtteData, data_to_portable, portable_to_data, is_portable_data,
     )
     try:
         from .data_types import (
@@ -120,7 +120,7 @@ def _import_helpers():
             portable_to_fragment_partition,
             is_portable_partition,
         )
-    _HELPERS_CACHE = (MolPalleteData, data_to_portable, portable_to_data, is_portable_data,
+    _HELPERS_CACHE = (MolPLAtteData, data_to_portable, portable_to_data, is_portable_data,
                       FragmentPartition, fragment_partition_to_portable,
                       portable_to_fragment_partition, is_portable_partition)
     return _HELPERS_CACHE
@@ -130,16 +130,16 @@ import numpy as _np
 
 
 def dehydrate(obj):
-    """Recursively replace MolPalleteData / FragmentPartition with portable
+    """Recursively replace MolPLAtteData / FragmentPartition with portable
     dicts and convert bare ``torch.Tensor`` values to ``numpy.ndarray``.
 
     Storing numpy avoids the ``torch.load``/``_load_from_bytes`` codepath
     at unpickle time, which is not fork-safe under PyTorch DataLoader
     workers.
     """
-    (MolPalleteData, data_to_portable, _ptd, _ipd,
+    (MolPLAtteData, data_to_portable, _ptd, _ipd,
      FragmentPartition, fragment_partition_to_portable, _ptfp, _ipfp) = _import_helpers()
-    if isinstance(obj, MolPalleteData):
+    if isinstance(obj, MolPLAtteData):
         return data_to_portable(obj)
     if isinstance(obj, FragmentPartition):
         return fragment_partition_to_portable(obj)
@@ -155,7 +155,7 @@ def dehydrate(obj):
 
 
 def hydrate(obj):
-    """Inverse of :func:`dehydrate`. Reconstructs MolPalleteData /
+    """Inverse of :func:`dehydrate`. Reconstructs MolPLAtteData /
     FragmentPartition from portable dicts. Bare ``numpy.ndarray`` values
     (from v2 records) are converted back to ``torch.Tensor``.
     """
@@ -237,7 +237,7 @@ class LMDBStore:
             if blob is None:
                 raise RuntimeError(
                     f"LMDB at {self.path} has no '__meta__' key — not a "
-                    f"MolPallete store, or never written")
+                    f"MolPLAtte store, or never written")
             self.meta: Dict[str, Any] = json.loads(blob.decode())
         # Compression dispatch — v2+ records carry the field; v1 stores
         # are zlib by convention.
@@ -412,7 +412,7 @@ class LMDBWriter:
 
         Pass ``blob`` (already-compressed pickle bytes) if you produced
         it elsewhere — it MUST match this writer's compression mode.
-        Otherwise we ``dehydrate`` (drop ``molpallete.*`` class refs),
+        Otherwise we ``dehydrate`` (drop ``molplatte.*`` class refs),
         pickle, and compress ``payload`` here using ``self.compression``.
         """
         if blob is None:

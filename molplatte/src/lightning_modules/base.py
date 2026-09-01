@@ -7,8 +7,8 @@ import torch.nn as nn
 import pytorch_lightning as pl
 
 
-class MolPalleteLightningModule(pl.LightningModule):
-    """Lightning wrapper around a plain ``nn.Module`` MolPallete model.
+class MolPLAtteLightningModule(pl.LightningModule):
+    """Lightning wrapper around a plain ``nn.Module`` MolPLAtte model.
 
     The wrapped model's ``forward(batch: dict) -> dict`` is expected to
     populate ``batch["loss/<name>"]`` entries (one scalar per loss

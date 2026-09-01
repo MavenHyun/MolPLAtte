@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""EDA report for a built MolPallete corpus, as a PDF.
+"""EDA report for a built MolPLAtte corpus, as a PDF.
 
 Reports the statistics that actually drive modelling decisions here: what the
 decomposition produces, how large the islinked augmentation space is, how skewed
@@ -11,8 +11,8 @@ Page layout follows MolDAM_prep/generate_report.py -- matplotlib PdfPages, Agg
 backend, one figure per page -- so the two projects' reports read alike.
 
     python generate_eda_report.py \\
-      --corpus /home/mogan/preprocessed/molpallete/coconut-flavordb_full_v2/naveja_recap \\
-      --out docs/molpallete_corpus_eda.pdf
+      --corpus /home/mogan/preprocessed/molplatte/coconut-flavordb_full_v2/naveja_recap \\
+      --out docs/molplatte_corpus_eda.pdf
 """
 
 from __future__ import annotations
@@ -37,9 +37,9 @@ RDLogger.DisableLog("rdApp.*")
 from rdkit.Chem import Draw
 from rdkit.Chem.Draw import rdMolDraw2D
 
-from molpallete_prep.lmdb_store import hydrate
-from molpallete_prep.preprocess import path_for
-from molpallete_prep.rgroup_library import load_vocabulary
+from molplatte_prep.lmdb_store import hydrate
+from molplatte_prep.preprocess import path_for
+from molplatte_prep.rgroup_library import load_vocabulary
 
 PAGE = (8.5, 11)
 
@@ -205,7 +205,7 @@ def main() -> int:
         vocab = load_vocabulary(vpath)
 
     with PdfPages(a.out) as pdf:
-        _page_title(pdf, "MolPallete — Corpus EDA",
+        _page_title(pdf, "MolPLAtte — Corpus EDA",
                     f"{root.name}\n{root}\n\ngenerated {datetime.now():%Y-%m-%d %H:%M}")
 
         # A. provenance

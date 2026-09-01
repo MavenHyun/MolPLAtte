@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ---------------------------------------------------------------------------
-# MolPallete smoke test -- does the whole stack run end to end?
+# MolPLAtte smoke test -- does the whole stack run end to end?
 #
 # Runs in the FOREGROUND on purpose: the only useful output is the traceback,
 # and a backgrounded smoke test that dies silently is worse than none.
@@ -18,7 +18,8 @@
 # ---------------------------------------------------------------------------
 set -euo pipefail
 
-REPO="${REPO:-/home/mogan/github/MolPallete/molpallete}"
+# derive the repo root from this script's own location: .../molplatte/src/scripts/x.sh
+REPO="${REPO:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 OUTDIR="$REPO/outputs/smoke"
 
 # Refuse to clobber: a stale outputs/smoke makes a passing run look like it

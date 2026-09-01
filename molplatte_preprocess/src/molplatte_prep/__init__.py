@@ -1,4 +1,4 @@
-"""MolPallete preprocessing — flavor-compound corpora for MolPLA-style pretraining.
+"""MolPLAtte preprocessing — flavor-compound corpora for MolPLA-style pretraining.
 
 Reads FlavorDB / COCONUT structures, decomposes each molecule into anchored
 cores + R-groups, and writes one record per molecule containing the intact graph
@@ -22,7 +22,7 @@ from .decomposers import (
     list_methods,
 )
 from .graph_hash import subgraph_hash
-from .mol_features import EDGE_ATTRS, NODE_ATTRS, MolPalleteData, mol_to_pyg
+from .mol_features import EDGE_ATTRS, NODE_ATTRS, MolPLAtteData, mol_to_pyg
 from .molpla_instance import (
     MolPlaInstance,
     build_instance,
@@ -34,7 +34,7 @@ from .molpla_instance import (
 __all__ = [
     "Decomposition",
     "EDGE_ATTRS",
-    "MolPalleteData",
+    "MolPLAtteData",
     "MolPlaInstance",
     "NODE_ATTRS",
     "RGroupInfo",

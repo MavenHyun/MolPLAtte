@@ -5,7 +5,7 @@ Every decomposer in this package follows the same pattern:
 1. Identify a set of **cleavable bonds** in M according to its chemistry
    rule (BRICS, RECAP, r-BRICS, MacFrag, ring-aware, Synton, DigFrag).
 2. Call :func:`bonds_to_partitions` to materialise one or more
-   :class:`~molpallete_prep.fragments.data_types.FragmentPartition` objects.
+   :class:`~molplatte_prep.fragments.data_types.FragmentPartition` objects.
 
 The shared converter handles:
 

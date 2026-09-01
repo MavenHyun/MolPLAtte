@@ -3,7 +3,7 @@
 Notation
 --------
 MolPLA's paper and its reference implementation use different letters for the
-same objects.  MolPallete standardises on the **code's** letters:
+same objects.  MolPLAtte standardises on the **code's** letters:
 
 ======  ==================  =========================================================
 Code    Paper (btae256)     Content
@@ -169,7 +169,7 @@ def build_instance(
     ----------
     mol_data
         PyG graph of the intact molecule, as produced by
-        :func:`molpallete_prep.mol_features.mol_to_pyg`.
+        :func:`molplatte_prep.mol_features.mol_to_pyg`.
     decomposition
         The anchored decomposition supplying core and R-group bookkeeping.
     islinked

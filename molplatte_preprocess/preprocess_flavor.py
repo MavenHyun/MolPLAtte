@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Build a MolPallete pretraining corpus from FlavorDB and/or COCONUT.
+"""Build a MolPLAtte pretraining corpus from FlavorDB and/or COCONUT.
 
 One corpus, one or more sources.  ``--source flavordb coconut`` reads both and
 writes a single combined corpus, which is what the pretraining runs use: the
@@ -39,14 +39,14 @@ Build the flavor corpus (small, fast -- validate the pipeline here first)::
 
     python preprocess_flavor.py \\
       --source flavordb --method macfrag \\
-      --output-path /home/mogan/preprocessed/molpallete/flavordb_full/macfrag \\
+      --output-path /home/mogan/preprocessed/molplatte/flavordb_full/macfrag \\
       --workers 32 --progress-every 2000
 
 Build the natural-product corpus::
 
     python preprocess_flavor.py \\
       --source coconut --method macfrag \\
-      --output-path /home/mogan/preprocessed/molpallete/coconut_full/macfrag \\
+      --output-path /home/mogan/preprocessed/molplatte/coconut_full/macfrag \\
       --max-heavy-atoms 50 --workers 88 --layout hash3 --progress-every 25000
 
 Re-running against a populated directory is refused unless ``--resume`` (skip
@@ -75,21 +75,21 @@ from rdkit import Chem, RDLogger
 
 RDLogger.DisableLog("rdApp.*")
 
-from molpallete_prep import __version__
-from molpallete_prep.anchored_from_partition import partitions_to_decompositions
-from molpallete_prep.condvec import CONDVEC_MODES, get_condvec_encoder
-from molpallete_prep.decompose import Decomposition, wash
-from molpallete_prep.decomposers import (
+from molplatte_prep import __version__
+from molplatte_prep.anchored_from_partition import partitions_to_decompositions
+from molplatte_prep.condvec import CONDVEC_MODES, get_condvec_encoder
+from molplatte_prep.decompose import Decomposition, wash
+from molplatte_prep.decomposers import (
     family_of,
     get_anchored_decomposer,
     get_fragment_decomposer,
     list_methods,
 )
-from molpallete_prep.graph_hash import HASH_VERSION, subgraph_hash
-from molpallete_prep.graph_ops import detach_rgroups_multi
-from molpallete_prep.mol_features import mol_to_pyg
-from molpallete_prep.molpla_instance import decomposition_record
-from molpallete_prep.preprocess import (
+from molplatte_prep.graph_hash import HASH_VERSION, subgraph_hash
+from molplatte_prep.graph_ops import detach_rgroups_multi
+from molplatte_prep.mol_features import mol_to_pyg
+from molplatte_prep.molpla_instance import decomposition_record
+from molplatte_prep.preprocess import (
     SHARD_LAYOUTS,
     existing_ids,
     path_for,
@@ -97,7 +97,7 @@ from molpallete_prep.preprocess import (
     write_meta,
     write_record,
 )
-from molpallete_prep.readers import SizeFilter, read_source
+from molplatte_prep.readers import SizeFilter, read_source
 
 # --------------------------------------------------------------------------- #
 # Worker state.  Set once per process by the pool initializer; the alternative
@@ -129,7 +129,7 @@ def _build_condvec(config):
     mode = config["condvec_mode"]
     if mode not in ("flavor", "two_part"):
         return get_condvec_encoder(mode)
-    from molpallete_prep.condvec import FlavorCondVec, load_flavor_tables, PocketCondVec, TwoPartCondVec
+    from molplatte_prep.condvec import FlavorCondVec, load_flavor_tables, PocketCondVec, TwoPartCondVec
     meas, mined = load_flavor_tables(config.get("flavor_measured"),
                                      config.get("flavor_mined"))
     fl = FlavorCondVec(measured=meas, mined=mined)
@@ -581,7 +581,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     index.sort(key=lambda e: e["id"])
 
     provenance = {
-        "molpallete_prep_version": __version__,
+        "molplatte_prep_version": __version__,
         # Five of the eleven atom/bond feature tables are RDKit enums whose
         # cardinality can shift between releases, which would silently invalidate
         # this corpus's embedding indices. Record the version that built it.

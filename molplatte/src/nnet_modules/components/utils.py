@@ -51,7 +51,7 @@ from .custom_convs import EdgeGatedGraphConv
 # also starves the assembly head's bond-recovery task. Kept for ablations only.
 EDGE_BLIND_CONVS = {"GCNConv", "SAGEConv", "GraphConv", "ChebConv", "GATConv"}
 
-# PyG convs that cannot carry per-edge *features*, mapped to the MolPallete
+# PyG convs that cannot carry per-edge *features*, mapped to the MolPLAtte
 # adaptation that can. GatedGraphConv scales messages by a scalar edge_weight;
 # EdgeGatedGraphConv gates them elementwise by the bond embedding instead,
 # keeping the GRU node update. Point the user at the adapter rather than
@@ -61,7 +61,7 @@ _NO_EDGE_ATTR_SUPPORT = {
                        "EdgeGatedGraphConv"),
 }
 
-# MolPallete-local convs, looked up before falling through to torch_geometric.nn.
+# MolPLAtte-local convs, looked up before falling through to torch_geometric.nn.
 _LOCAL_CONVS = {"EdgeGatedGraphConv": EdgeGatedGraphConv}
 
 # Node-degree histogram over the ZINC-1pct anchored corpus (core + rgroups,
@@ -74,8 +74,8 @@ def _make_conv(name: str, in_dim: int, out_dim: int, edge_dim: int) -> nn.Module
     if name in _NO_EDGE_ATTR_SUPPORT:
         why, alternative = _NO_EDGE_ATTR_SUPPORT[name]
         raise ValueError(
-            f"{name!r} cannot be used as a MolPallete backbone as-is: it {why}. "
-            f"MolPallete encodes five bond attributes per edge. Use "
+            f"{name!r} cannot be used as a MolPLAtte backbone as-is: it {why}. "
+            f"MolPLAtte encodes five bond attributes per edge. Use "
             f"{alternative!r} instead -- it keeps {name}'s GRU node update but "
             f"gates each message by the bond embedding.")
 

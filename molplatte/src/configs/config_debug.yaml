@@ -1,6 +1,6 @@
 # @package _global_
 #
-# Debug config for MolPallete.
+# Debug config for MolPLAtte.
 # Small model, tiny batch, num_workers=0 (clean tracebacks + breakpoints),
 # limit_train_batches / limit_val_batches so each "epoch" is ~5 gradient steps.
 #
@@ -18,7 +18,7 @@ defaults:
   - config
   - _self_
 
-experiment_name: debug_molpallete
+experiment_name: debug_molplatte
 random_seed: 0
 debug_mode: false
 
@@ -68,4 +68,4 @@ trainer_kwargs:
 hydra:
   run:
     # relative to src/ (hydra runs with cwd=src) -> repo-root outputs/
-    dir: ../outputs/debug_molpallete
+    dir: ../outputs/debug_molplatte

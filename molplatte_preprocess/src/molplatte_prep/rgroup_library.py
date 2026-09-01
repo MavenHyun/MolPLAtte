@@ -22,7 +22,7 @@ Two artefacts, built at different times:
 
 Keying
 ------
-MolPLA keys the vocabulary on the R-group's masked SMILES string.  MolPallete keys
+MolPLA keys the vocabulary on the R-group's masked SMILES string.  MolPLAtte keys
 on the **Weisfeiler-Lehman subgraph hash** instead and carries SMILES as a label,
 because a masked linker atom is not a real chemical entity: two R-groups can share
 a SMILES while differing in mask state, and RDKit's canonicalisation of a fragment
@@ -208,7 +208,7 @@ def rgroup_smiles(
 def save_vocabulary(vocab: RGroupVocabulary, path: str | Path) -> Path:
     """Write the vocabulary as gzipped pickle, graphs in portable numpy form.
 
-    Portable form keeps ``molpallete_prep`` class qualnames and torch tensors out
+    Portable form keeps ``molplatte_prep`` class qualnames and torch tensors out
     of the pickle, so the training repo can load a vocabulary without importing
     this package and without tripping the fork-safety problem that torch tensors
     in pickles cause under multi-worker DataLoaders.

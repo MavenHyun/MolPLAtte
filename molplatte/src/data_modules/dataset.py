@@ -54,7 +54,7 @@ from .molpla_prep_bridge import (
     sample_islinked,
 )
 
-__all__ = ["MolPalleteSample", "MolPalleteDataset"]
+__all__ = ["MolPLAtteSample", "MolPLAtteDataset"]
 
 #: How many neighbouring indices to try when a record is missing or torn (an
 #: rsync mid-flight, a killed build).  Mirrors MolDAM's skip loop.
@@ -71,8 +71,8 @@ _MAX_FILTER_SKIP = 4096
 
 
 @dataclass
-class MolPalleteSample:
-    """One MolPLA training instance, ready for :func:`collate_molpallete`."""
+class MolPLAtteSample:
+    """One MolPLA training instance, ready for :func:`collate_molplatte`."""
 
     G: object
     P: object
@@ -95,7 +95,7 @@ class MolPalleteSample:
     smiles: str
 
 
-class MolPalleteDataset(Dataset):
+class MolPLAtteDataset(Dataset):
     """Per-molecule ``.pt`` corpus with on-the-fly MolPLA view construction.
 
     Parameters
@@ -155,7 +155,7 @@ class MolPalleteDataset(Dataset):
             _rng = _np.random.default_rng(20260831)
             self._shuffle_perm = _rng.permutation(len(self.ids))
             logging.getLogger(__name__).warning(
-                "[MolPalleteDataset] SHUFFLE TEST ACTIVE -- condition vectors are "
+                "[MolPLAtteDataset] SHUFFLE TEST ACTIVE -- condition vectors are "
                 "permuted across molecules. This run measures whether the condition "
                 "carries signal; it is NOT a valid model."
             )
@@ -228,7 +228,7 @@ class MolPalleteDataset(Dataset):
         common = {h for h, c in counts.items() if c >= threshold}
         share = sum(counts[h] for h in common) / max(arr.sum(), 1.0)
         logging.getLogger(__name__).info(
-            "[MolPalleteDataset] common-R-group filter: %s of %s hashes at "
+            "[MolPLAtteDataset] common-R-group filter: %s of %s hashes at "
             "p%.2f (count >= %.0f), covering %.1f%% of occurrences; instances "
             "with >%.0f%% common detached R-groups are redrawn",
             f"{len(common):,}", f"{len(counts):,}", percentile, threshold,
@@ -251,7 +251,7 @@ class MolPalleteDataset(Dataset):
             return None
         return hydrate(raw)
 
-    def __getitem__(self, index: int) -> MolPalleteSample:
+    def __getitem__(self, index: int) -> MolPLAtteSample:
         n = len(self)
         budget = _MAX_FILTER_SKIP if self._common else _MAX_SKIP
         for step in range(budget):
@@ -274,7 +274,7 @@ class MolPalleteDataset(Dataset):
             if not self._warned_filter_fallback:
                 self._warned_filter_fallback = True
                 logging.getLogger(__name__).warning(
-                    "[MolPalleteDataset] common-R-group filter rejected %d "
+                    "[MolPLAtteDataset] common-R-group filter rejected %d "
                     "consecutive instances near index %d; falling back to "
                     "unfiltered draws. The filter is too aggressive for this "
                     "corpus -- at k=1 it reduces to 'drop if the R-group is "
@@ -300,7 +300,7 @@ class MolPalleteDataset(Dataset):
 
     def _to_sample(self, record: dict,
                    decomp_index: Optional[int] = None,
-                   apply_filter: bool = True) -> Optional[MolPalleteSample]:
+                   apply_filter: bool = True) -> Optional[MolPLAtteSample]:
         decomps = record["decompositions"]
         chosen_index = decomp_index
         if decomp_index is not None:
@@ -404,7 +404,7 @@ class MolPalleteDataset(Dataset):
                 pass
         hashes = [decomp["rgroup_hashes"][i] for i in detached]
 
-        return MolPalleteSample(
+        return MolPLAtteSample(
             G=instance.G,
             P=instance.P,
             R=instance.R,

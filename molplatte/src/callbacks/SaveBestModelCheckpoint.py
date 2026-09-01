@@ -13,10 +13,10 @@ class SaveBestModelCheckpoint(pl.Callback):
     whenever a watched val metric improves.
 
     Default watches ``val/loss`` written by
-    :class:`lightning_modules.MolPalleteLightningModule`. Saves
+    :class:`lightning_modules.MolPLAtteLightningModule`. Saves
     ``model.state_dict()`` where ``model`` is two levels in:
-    ``LightningModule.model``      →  ``LossModuleMolPallete``
-    ``LossModuleMolPallete.model`` →  ``MolPallete``  ← this gets saved.
+    ``LightningModule.model``      →  ``LossModuleMolPLAtte``
+    ``LossModuleMolPLAtte.model`` →  ``MolPLAtte``  ← this gets saved.
 
     Always saves only on global_rank=0 (DDP-safe).
     """
@@ -45,7 +45,7 @@ class SaveBestModelCheckpoint(pl.Callback):
         self.best = current
         if trainer.global_rank != 0:
             return
-        # LightningModule.model = LossModuleMolPallete; .model.model = nnet
+        # LightningModule.model = LossModuleMolPLAtte; .model.model = nnet
         target = pl_module.model.model if hasattr(pl_module.model, "model") else pl_module.model
         os.makedirs(os.path.dirname(self.save_path), exist_ok=True)
         torch.save(target.state_dict(), self.save_path)

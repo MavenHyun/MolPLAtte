@@ -4,7 +4,7 @@
 # top-level `hidden_dim` / `dropout_rate` / `norm_method` down into any
 # component that did not override them.
 
-nnet_module: MolPallete
+nnet_module: MolPLAtte
 nnet_module_kwargs:
   hidden_dim:                300      # MolPLA's released width
   dropout_rate:              0.0

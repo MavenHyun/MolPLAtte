@@ -9,7 +9,7 @@
 # ships 0.1 for the graph term. Following the code, since that is what produced
 # the published numbers.
 
-loss_module: LossModuleMolPallete
+loss_module: LossModuleMolPLAtte
 loss_module_kwargs:
   # #1  pooled G <-> pooled Q          (paper tau 0.01, code 0.1)
   loss_graph_kwargs:
@@ -26,7 +26,7 @@ loss_module_kwargs:
     # cosine ANN with no re-ranking. main.py derives FAISSRetrieval's
     # popularity_correction from this flag so training and evaluation cannot
     # disagree about what the similarity means.
-    # TRUE, on MolPallete's own measurement. This was FALSE, inherited from
+    # TRUE, on MolPLAtte's own measurement. This was FALSE, inherited from
     # MolDAM's devlog Phase 10, which measured a 14% loss (r@10 0.5792 vs
     # 0.6705) and concluded "Do not adopt logq_correction=True as-is". That
     # verdict does NOT transfer, and importing it untested cost ~3x retrieval
@@ -34,7 +34,7 @@ loss_module_kwargs:
     #
     # Why it differs: the correction's value scales with how skewed the sampling
     # distribution is. MolDAM's anchored corpus has effective vocabulary 120;
-    # MolPallete's is 889 over 86,385 rows. MolDAM's objection -- that q is
+    # MolPLAtte's is 889 over 86,385 rows. MolDAM's objection -- that q is
     # estimated from batch counts and floors at 1/batch_size, understating rare
     # chemistries -- is answered here by the running Laplace-smoothed estimator
     # in loss_modules/contrastive.py, which accumulates counts ACROSS batches

@@ -3,14 +3,14 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "molpallete-prep"
+name = "molplatte-prep"
 version = "0.1.0"
-description = "Corpus builder for MolPallete: FlavorDB / COCONUT -> anchored core + R-group records for MolPLA-style pretraining."
+description = "Corpus builder for MolPLAtte: FlavorDB / COCONUT -> anchored core + R-group records for MolPLA-style pretraining."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [
-  { name = "MolPallete contributors" },
+  { name = "MolPLAtte contributors" },
 ]
 keywords = [
   "molpla",
@@ -32,7 +32,7 @@ classifiers = [
 
 dependencies = [
   # Upper bound is deliberate, not cargo-culted.  Five of the eleven feature
-  # tables in molpallete_prep/mol_features.py are built by enumerating an RDKit
+  # tables in molplatte_prep/mol_features.py are built by enumerating an RDKit
   # enum at import time:
   #     chiral_tag   <- Chem.rdchem.ChiralType.names
   #     hybridization<- Chem.rdchem.HybridizationType.names
@@ -65,14 +65,15 @@ dev = ["pytest>=7"]
 
 [tool.setuptools]
 packages = [
-  "molpallete_prep",
-  "molpallete_prep.decomposers",
-  "molpallete_prep.preprocess",
-  "molpallete_prep.vendor",
-  "molpallete_prep.vendor.synton",
-  "molpallete_prep.vendor.synton.src",
+  "molplatte_prep",
+  "molplatte_prep.decomposers",
+  "molplatte_prep.preprocess",
+  "molplatte_prep.vendor",
+  "molplatte_prep.vendor.synton",
+  "molplatte_prep.vendor.synton.src",
 ]
+package-dir = {"" = "src"}
 py-modules = ["preprocess_flavor"]
 
 [tool.setuptools.package-data]
-"molpallete_prep.vendor.synton" = ["config/*.xml"]
+"molplatte_prep.vendor.synton" = ["config/*.xml"]

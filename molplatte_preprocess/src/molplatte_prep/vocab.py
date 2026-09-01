@@ -1,12 +1,12 @@
 """Vocabulary file format for masked-linker sub-graphs.
 
 A *vocabulary* is a dict keyed by ``subgraph_hash`` (a Weisfeiler-Lehman
-graph-isomorphism hash; see :func:`molpallete_prep.anchored.graph_ops.subgraph_hash`)
+graph-isomorphism hash; see :func:`molplatte_prep.anchored.graph_ops.subgraph_hash`)
 mapping to a per-entry record::
 
     {
         "count":      int,            # number of occurrences across the dataset
-        "graph":      MolPalleteData,     # canonical example, linker_metas stripped
+        "graph":      MolPLAtteData,     # canonical example, linker_metas stripped
         "num_atoms":  int,
         "num_masked": int,            # number of is_linker=True atoms
     }
@@ -19,10 +19,10 @@ vocabulary identity — keeping them would bloat the file and might confuse
 downstream code into thinking the vocab entry encodes one specific parent.
 
 I/O is via plain ``pickle`` + ``zlib`` so the file is portable to any
-Python env that can import ``molpallete_prep``.
+Python env that can import ``molplatte_prep``.
 
 Public API:
-  - ``build_vocab(items)`` — list[MolPalleteData] -> vocab dict (with counts).
+  - ``build_vocab(items)`` — list[MolPLAtteData] -> vocab dict (with counts).
   - ``merge_vocab(*vocabs)`` — combine N vocab dicts (sum counts, keep
     first-seen graph as the canonical example).
   - ``save_vocab(vocab, path)`` / ``load_vocab(path)``.
@@ -40,7 +40,7 @@ import torch
 from torch_geometric.data import Data
 
 from .graph_hash import subgraph_hash
-from .mol_features import MolPalleteData
+from .mol_features import MolPLAtteData
 
 
 def strip_linker_metas(data: Data, in_place: bool = False) -> Data:
@@ -73,7 +73,7 @@ def _entry_for(graph: Data, count: int = 1) -> dict:
 def build_vocab(items: Iterable[Data],
                 hash_kwargs: dict = None,
                 ) -> Dict[str, dict]:
-    """Build a vocabulary from an iterable of ``MolPalleteData`` objects.
+    """Build a vocabulary from an iterable of ``MolPLAtteData`` objects.
 
     Items can repeat — duplicates increment the corresponding entry's
     ``count``. The first occurrence per hash is kept as the canonical

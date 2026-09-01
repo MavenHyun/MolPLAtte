@@ -6,5 +6,5 @@
 
 Pinned at the upstream commit at vendoring time. **Treat as read-only** —
 local changes belong in the adapter modules under
-``molpallete_prep.decomposers`` instead.
+``molplatte_prep.decomposers`` instead.
 """

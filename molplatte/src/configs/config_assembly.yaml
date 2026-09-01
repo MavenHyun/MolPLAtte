@@ -1,6 +1,6 @@
 # @package _global_
 #
-# MolPallete + core decoration: the three MolPLA contrastive objectives plus
+# MolPLAtte + core decoration: the three MolPLA contrastive objectives plus
 # recovery of the chemistry masking destroyed at each linker joint.
 #
 # Equivalent to `--config-name config assembly.enabled=true` with a wider set of

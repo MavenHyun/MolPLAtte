@@ -7,7 +7,7 @@
 # validation time by callbacks/RGroupLibraryRetrieval.py.
 set -euo pipefail
 
-CORPORA="${CORPORA:-/home/mogan/preprocessed/molpallete}"
+CORPORA="${CORPORA:-/home/mogan/preprocessed/molplatte}"
 WORKERS="${WORKERS:-88}"
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO"

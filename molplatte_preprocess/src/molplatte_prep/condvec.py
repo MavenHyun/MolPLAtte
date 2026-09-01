@@ -6,13 +6,13 @@ core-side linker node embedding and ``(+)`` is concatenation (paper Eq. 11).
 The paper states ``c_R in [0,1]^87``; the released code allocates 88 and fills it
 from ``thermo.functional_groups``.  ``thermo`` is not a dependency here, and its
 88 checks are bulk-thermodynamic classes rather than flavor chemistry, so
-MolPallete defines its own vector from RDKit.
+MolPLAtte defines its own vector from RDKit.
 
 The paper's ablations make the stakes clear: an all-zero condition (`Cond. None`)
 drops retrieval MRR from 0.2616 to 0.0056, and an all-ones condition
 (`Cond. All`) to <0.0001.  A degenerate condition is worse than none.
 
-MolPallete supports two modes, selected by ``--condvec-mode``:
+MolPLAtte supports two modes, selected by ``--condvec-mode``:
 
 ``neutral``
     Ligand-only.  85 RDKit ``Chem.Fragments.fr_*`` counters plus 12 SMARTS
@@ -157,7 +157,7 @@ class PocketCondVec(CondVecEncoder):
     """Protein-pocket condition vector -- declared interface, unfed implementation.
 
     MolPLA's own stated future work is "R-group retrieval conditioned by protein
-    pockets" (paper section 4.3).  MolPallete reserves the slot and fixes the
+    pockets" (paper section 4.3).  MolPLAtte reserves the slot and fixes the
     contract so the training side needs no change when a pocket source arrives:
 
     - ``context`` is the pocket handle (a PDB path, a pocket graph, or a

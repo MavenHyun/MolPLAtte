@@ -64,10 +64,10 @@ def wash(mol_or_smiles, remove_stereo: bool = True,
     Parameters
     ----------
     remove_stereo
-        MolPallete passes ``False``: cis/trans isomerism is chemically
+        MolPLAtte passes ``False``: cis/trans isomerism is chemically
         load-bearing in flavour ((Z)- vs (E)-3-hexenol are different odorants).
     neutralise
-        Apply the charge-neutralisation reactions. MolPallete passes ``False``:
+        Apply the charge-neutralisation reactions. MolPLAtte passes ``False``:
         4.6% of FlavorDB and 2.8% of COCONUT carry a formal charge before
         washing -- organic acids, amino acids, quaternary ammonium tastants --
         and neutralising them collapses ``formal_charge`` to a single class,
@@ -368,7 +368,7 @@ def decompose_molecule(mol_or_smiles,
     ``include_ring_substituents=True``.
 
     Pass ``method=`` to switch fragmentation algorithm; the call is routed
-    through :func:`molpallete_prep.decomposers.get_decomposer`. Recognised
+    through :func:`molplatte_prep.decomposers.get_decomposer`. Recognised
     values include ``"recap"``, ``"naveja_recap"``, ``"brics"``,
     ``"rbrics"``, ``"murcko"``, ``"macfrag"``, ``"ring_aware"``. Method-
     specific kwargs flow through as ``**method_kwargs``.
@@ -382,7 +382,7 @@ def decompose_molecule(mol_or_smiles,
 
     if method is not None:
         # Route through the anchored registry. The fragments paradigm has
-        # its own entry point (molpallete_prep.fragments) — not exposed here.
+        # its own entry point (molplatte_prep.fragments) — not exposed here.
         from .decomposers import get_anchored_decomposer as get_decomposer
         return mol, get_decomposer(method, **method_kwargs)(mol)
 

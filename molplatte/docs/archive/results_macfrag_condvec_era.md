@@ -31,7 +31,7 @@
 >    `log p` back moved lift from 0.61x to 2.20x, reproducing MolDAM devlog
 >    Phase 9 -> Phase 10 independently.
 >
-> Current corpus statistics: `molpallete_corpus_eda.pdf`.
+> Current corpus statistics: `molplatte_corpus_eda.pdf`.
 
 ---
 
@@ -66,7 +66,7 @@ acyclic because ring bonds are never cut). Any *connected* vertex subset taken a
 the core leaves one component per boundary edge, each attached by exactly one cut
 bond — a genuine star. Enumerating connected subsets above `ratio * n_atoms`
 reproduces MolPLA's "single molecule, multiple putative cores" property.
-Implemented in `molpallete_prep/anchored_from_partition.py`.
+Implemented in `molplatte_prep/anchored_from_partition.py`.
 
 Same 400 molecules, `macfrag` re-framed:
 
@@ -136,18 +136,18 @@ retrieves the top 1000 per query. MRR and Hit@{5,10,20,50,100,500,1000} are
 computed over that library. Without it there is no lead-optimization task; an
 in-batch gallery measures a much easier problem under a similar name.
 
-MolPallete builds it in two halves, because they have different lifetimes:
+MolPLAtte builds it in two halves, because they have different lifetimes:
 
 | half | built by | depends on | rebuilt |
 |---|---|---|---|
-| **vocabulary** — distinct R-groups, canonical masked graphs, counts, condvecs | `molpallete_preprocess/enumerate_rgroups.py` | the corpus only | once per corpus |
-| **vector library** — those graphs embedded + FAISS index | `callbacks/RGroupLibraryRetrieval.py` (training) / `molpallete/src/build_library.py` (inference) | the projector's current weights | **every validation epoch** |
+| **vocabulary** — distinct R-groups, canonical masked graphs, counts, condvecs | `molplatte_preprocess/enumerate_rgroups.py` | the corpus only | once per corpus |
+| **vector library** — those graphs embedded + FAISS index | `callbacks/RGroupLibraryRetrieval.py` (training) / `molplatte/src/build_library.py` (inference) | the projector's current weights | **every validation epoch** |
 
 The second half must be rebuilt continuously: a library embedded at epoch 3 is
 meaningless for a query embedded at epoch 7. MolPLA rebuilds it at every
 validation; so does the callback.
 
-**Keying.** MolPLA keys the vocabulary on the R-group's masked SMILES. MolPallete
+**Keying.** MolPLA keys the vocabulary on the R-group's masked SMILES. MolPLAtte
 keys on the **WL subgraph hash** and carries SMILES as a label, because a masked
 linker atom is not a real chemical entity — two structurally different masked
 graphs can strip to the same SMILES (`*O` appears twice in the FlavorDB
@@ -336,7 +336,7 @@ reflects an easier library, not a better model.
 ## 5.6 Assembly head — 30 epochs, head on vs off
 
 Identical settings, `assembly.enabled` the only difference. Both logged to wandb
-project `NoahsFarm_MolPallete`.
+project `NoahsFarm_MolPLAtte`.
 
 | metric | baseline | assembly | delta |
 |---|---|---|---|

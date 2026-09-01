@@ -4,7 +4,9 @@ import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 import numpy as np
 
-OUT="/home/mogan/github/MolPallete/molpallete_preprocess/docs/flavor_conditioning_report.pdf"
+from pathlib import Path as _P
+# .../molplatte_preprocess/scripts/this.py -> .../molplatte_preprocess/docs/
+OUT=str(_P(__file__).resolve().parents[1]/"docs"/"flavor_conditioning_report.pdf")
 A4=(8.27,11.69)
 def page(pdf, title, sub=None):
     fig=plt.figure(figsize=A4); fig.subplots_adjust(top=0.93)
@@ -19,12 +21,12 @@ with PdfPages(OUT) as pdf:
     # ---------- cover ----------
     fig=plt.figure(figsize=A4)
     fig.text(0.5,0.72,"Flavor profiles as sparse condition vectors",ha="center",size=19,weight="bold")
-    fig.text(0.5,0.675,"MolPallete — what was measured, and why the approach was not adopted",
+    fig.text(0.5,0.675,"MolPLAtte — what was measured, and why the approach was not adopted",
              ha="center",size=10.5,style="italic")
     body(fig,0.58,
 """SUMMARY
 
-MolPallete's brief specifies a condition vector that is either protein-pocket
+MolPLAtte's brief specifies a condition vector that is either protein-pocket
 context or neutral. This report records what happened when we tried to build a
 flavor-derived condition signal for the 393,066-molecule corpus, and why every
 route examined was rejected.

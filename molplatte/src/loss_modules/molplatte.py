@@ -1,11 +1,11 @@
-"""MolPallete's three-objective loss module.
+"""MolPLAtte's three-objective loss module.
 
 Total loss is the weighted sum of the three contrastive terms::
 
     L = w_graph * L_graph + w_linker * L_linker + w_rgroup * L_rgroup
 
 The paper reports all three weights as 1 (Eq. 14); the released implementation
-uses 1.0 / 0.1 / 1.0.  MolPallete follows the implementation and exposes the
+uses 1.0 / 0.1 / 1.0.  MolPLAtte follows the implementation and exposes the
 weights on the LightningModule, because the paper's own limitations section
 attributes MolPLA's non-synergistic results to "adversarial optimization
 trajectories incurred by three different loss objectives" -- i.e. the balance is
@@ -28,10 +28,10 @@ from .assembly import AssemblyLoss
 from .base import LossModule
 from .contrastive import DualInfoNCE, group_ids_from_keys
 
-__all__ = ["LossModuleMolPallete"]
+__all__ = ["LossModuleMolPLAtte"]
 
 
-class LossModuleMolPallete(LossModule):
+class LossModuleMolPLAtte(LossModule):
     def __init__(
         self,
         model,

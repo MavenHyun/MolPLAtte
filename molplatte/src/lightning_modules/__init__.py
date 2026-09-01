@@ -1,5 +1,5 @@
-from .base import MolPalleteLightningModule
+from .base import MolPLAtteLightningModule
 
 __all__ = [
-    "MolPalleteLightningModule",
+    "MolPLAtteLightningModule",
 ]

@@ -1,14 +1,14 @@
-# MolPallete — Design Notes (working draft)
+# MolPLAtte — Design Notes (working draft)
 
 > Status: **v1 built and validated end-to-end.** Corpora built, forward/backward
 > verified, full Hydra training loop runs. Written from the MolPLA paper + released
 > code, MolDAM, and MolDAM_prep, with every claim below measured on this machine.
 
-MolPallete = **MolPLA's pretraining objectives** + **MolDAM's engineering** + **flavor chemistry**.
+MolPLAtte = **MolPLA's pretraining objectives** + **MolDAM's engineering** + **flavor chemistry**.
 
 ---
 
-## 1. What MolPallete is
+## 1. What MolPLAtte is
 
 1. A variant of MolPLA with an **auxiliary pretraining objective for lead optimization
    (core decoration)**.
@@ -19,7 +19,7 @@ MolPallete = **MolPLA's pretraining objectives** + **MolDAM's engineering** + **
 4. Shares MolDAM's **anchored paradigm** (core + K R-groups, masked clone-joints,
    multi-decomposition enumeration per molecule).
 
-Inheritance rule from the brief: `molpallete/` inherits **the primary traits of MolPLA,
+Inheritance rule from the brief: `molplatte/` inherits **the primary traits of MolPLA,
 not MolDAM** — MolDAM contributes code structure, implementation style, and the
 efficient decomposition/corpus machinery.
 
@@ -33,7 +33,7 @@ Source: `/home/mogan/github/MolPLA` (`src/models/MolPLA.py`, `src/dataloaders/ba
 ### 2.1 The three views — paper notation vs code notation
 
 The paper and the reference implementation use **different letters for the same objects**.
-MolPallete standardises on the code's letters and records the mapping once:
+MolPLAtte standardises on the code's letters and records the mapping once:
 
 | Code (`MolPLA.py`) | Paper (btae256) | Content |
 |---|---|---|
@@ -42,7 +42,7 @@ MolPallete standardises on the code's letters and records the mapping once:
 | `R` | `𝔾_{R_{i,j,k}}` | the decoupled R-groups, one graph each, each with one masked linker atom |
 | `Q` | `𝒢_{D_{i,j,k}}` | `P ∪ R` — node-set union, pooled as one graph |
 
-⚠️ The paper's `Q` is the code's `P`. Do not mix them. MolPallete uses **G / P / R / Q** as above.
+⚠️ The paper's `Q` is the code's `P`. Do not mix them. MolPLAtte uses **G / P / R / Q** as above.
 
 `k` indexes a **non-empty subset** of the core's R-groups; the code stores it as the
 `islinked` bitstring (`'1'` = stays attached → part of `P`, `'0'` = decoupled → a member of
@@ -79,7 +79,7 @@ pairs, with `B1 ≥ B2` and `B1 ≥ B3`.
 
 Loss #3 is the **R-group retrieval / lead-optimization** head — it is *per-linker*, not a
 sum-pooled bag. This is precisely the MolPLA trait MolDAM dropped (MolDAM anchored
-§2, §5.1) and the one MolPallete must restore.
+§2, §5.1) and the one MolPLAtte must restore.
 
 ### 2.3 Stop-gradient toggles
 
@@ -100,7 +100,7 @@ Ablations in the paper show this vector is load-bearing: `Cond. None` (all-zero)
 retrieval MRR from 0.2616 to 0.0056, and `Cond. All` (all-one) to <0.0001 — a degenerate
 condition is *worse* than no condition.
 
-MolPallete generalises this slot to `{neutral, pocket}` — see §5.
+MolPLAtte generalises this slot to `{neutral, pocket}` — see §5.
 
 ### 2.5 Data-instance schema (per molecule, pre-transform)
 
@@ -132,14 +132,14 @@ Source: `/home/mogan/github/MolDAM`, `/home/mogan/github/MolDAM_prep`.
 - `preprocess_*.py` worker-pool driver, seeded per-record Bernoulli sampling, atomic
   metadata writes, refuse-to-overwrite
 
-### 3.1 Hard-won findings from MolDAM_prep that constrain MolPallete
+### 3.1 Hard-won findings from MolDAM_prep that constrain MolPLAtte
 
 1. **`naveja_recap` with a `ratio` threshold cannot produce multi-R-group
    decompositions** — 99.42% of instances have exactly one R-group at `ratio=2/3`, and
    even `ratio=1/2` only reaches 0.83%. Cause is structural: `find_putative_cores` takes
    RECAP *children* as cores, and a child is one connected fragment. A 5.9 h rebuild was
    spent discovering this.
-   **Consequence for MolPallete:** MolPLA's whole formulation needs `k ≥ 2` R-groups for
+   **Consequence for MolPLAtte:** MolPLA's whole formulation needs `k ≥ 2` R-groups for
    the `islinked` bitmask and core-decoration objective to be non-degenerate. So the
    corpus must come from a **multi-cut** decomposer (`macfrag`, `synton`) re-framed into
    core+R-groups, or from `naveja` at a much lower ratio. **This is the central
@@ -184,27 +184,27 @@ directly comparable to the combined ones on record counts.
 ## 4. Repo layout
 
 ```
-MolPallete/
-  molpallete_preprocess/         corpus builder   (mirrors MolDAM_prep)
+MolPLAtte/
+  molplatte_preprocess/         corpus builder   (mirrors MolDAM_prep)
     preprocess_flavor.py           the driver
-    molpallete_prep/               the package
+    molplatte_prep/               the package
     scripts/build_all_corpora.sh
     docs/corpus_format.md
-  molpallete/                    training repo    (mirrors MolDAM)
-    docs/molpallete_design.md      this file
+  molplatte/                    training repo    (mirrors MolDAM)
+    docs/molplatte_design.md      this file
     src/{configs,data_modules,nnet_modules,loss_modules,lightning_modules,callbacks,scripts}
 ```
 
-The brief names the preprocessing directory `molpallete_prep`; the pre-created
-directory was `molpallete_preprocess`, so that is the repo name and
-`molpallete_prep` is the Python package inside it.
+The brief names the preprocessing directory `molplatte_prep`; the pre-created
+directory was `molplatte_preprocess`, so that is the repo name and
+`molplatte_prep` is the Python package inside it.
 
 ---
 
 ## 5. Measured results
 
-Current corpus statistics live in **[`molpallete_preprocess/docs/molpallete_corpus_eda.pdf`](../../molpallete_preprocess/docs/molpallete_corpus_eda.pdf)**,
-regenerated with `molpallete_preprocess/generate_eda_report.py`.
+Current corpus statistics live in **[`molplatte_preprocess/docs/molplatte_corpus_eda.pdf`](../../molplatte_preprocess/docs/molplatte_corpus_eda.pdf)**,
+regenerated with `molplatte_preprocess/generate_eda_report.py`.
 
 Results from the macfrag / condition-vector era are archived in
 [`archive/results_macfrag_condvec_era.md`](archive/results_macfrag_condvec_era.md).
