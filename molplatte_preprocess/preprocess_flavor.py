@@ -129,14 +129,40 @@ def _build_condvec(config):
     mode = config["condvec_mode"]
     if mode not in ("flavor", "two_part"):
         return get_condvec_encoder(mode)
-    from molplatte_prep.condvec import FlavorCondVec, load_flavor_tables, PocketCondVec, TwoPartCondVec
+    from molplatte_prep.condvec import (FlavorCondVec, load_flavor_tables,
+        PocketCondVec, TwoPartCondVec, FLAVOR_LABELS)
     meas, mined = load_flavor_tables(config.get("flavor_measured"),
                                      config.get("flavor_mined"))
     fl = FlavorCondVec(measured=meas, mined=mined)
+    _assert_flavor_tables_reachable(fl, meas, mined)
     if mode == "flavor":
         return fl
     return TwoPartCondVec(fl, PocketCondVec(dim=int(config.get("pocket_dim", 0))))
 
+
+def _assert_flavor_tables_reachable(encoder, meas, mined) -> None:
+    """Fail loudly if loaded flavor tables cannot actually be hit.
+
+    The first build of every corpus silently produced a condvec that was a pure
+    function of MW>350: mol_context was read from a record whose `meta` key did
+    not exist yet, so the InChIKey was always "" and neither table was ever
+    consulted. Nothing failed -- the vector just carried one bit. This check
+    encodes a key taken from the tables themselves, so a lookup path that stops
+    working stops the build instead of quietly degrading 400K records.
+    """
+    from molplatte_prep.condvec import FLAVOR_LABELS
+    for table in (meas, mined):
+        if not table:
+            continue
+        key = next(iter(table))
+        vec = encoder.encode(None, {"mol_id": "", "inchikey": key, "mw": None})
+        on = {FLAVOR_LABELS[i] for i, x in enumerate(vec) if x > 0.5}
+        if not (on - {"odorless", "unknown"}):
+            raise RuntimeError(
+                f"flavor table loaded with {len(table):,} keys but encoding a key "
+                f"from it ({key!r}) yielded {sorted(on)}; the lookup path is broken "
+                f"and every condvec would collapse to the MW fallback."
+            )
 
 def _rgroup_condvec(mol: Chem.Mol, rgroup_atoms: Iterable[int]) -> np.ndarray:
     """Functional-group condition vector for one R-group.
@@ -182,6 +208,38 @@ def _decompose(mol: Chem.Mol) -> List[Decomposition]:
     )
 
 
+#: InChIKey and MW live under different column names per source: COCONUT's CSV
+#: uses snake_case, FlavorDB's properties.csv uses PubChem's CamelCase. Reading
+#: only COCONUT's spelling silently yields "" for every FlavorDB molecule.
+_INCHIKEY_KEYS = ("standard_inchi_key", "InChIKey", "inchikey", "inchi_key")
+_MW_KEYS = ("molecular_weight", "MolecularWeight", "mw")
+
+
+def _first(meta: dict, keys) -> str:
+    for k in keys:
+        v = meta.get(k)
+        if v not in (None, ""):
+            return v
+    return ""
+
+
+def _mol_context(mol_id: str, meta: Optional[dict]) -> dict:
+    """Molecule-level context for the flavor condvec.
+
+    Built from the loop-local ``meta``, NOT from the in-progress record: the
+    record does not get its ``meta`` key until the payload is assembled further
+    down, so reading it here yielded {} for every molecule ever built and
+    collapsed the 24-bit flavor vector to a single MW>350 bit.
+    """
+    meta = meta or {}
+    return {
+        "mol_id": mol_id or "",
+        "inchikey": str(_first(meta, _INCHIKEY_KEYS)).strip(),
+        "mw": _first(meta, _MW_KEYS) or None,
+        "contains_sugar": str(meta.get("contains_sugar", "")).lower() == "true",
+    }
+
+
 def _process_one(item: Tuple[str, str, str, dict]) -> Tuple[str, str, Optional[dict]]:
     """Wash, decompose and persist one molecule.
 
@@ -215,12 +273,7 @@ def _process_one(item: Tuple[str, str, str, dict]) -> Tuple[str, str, Optional[d
             # clone of its core-side neighbour -- NOT on which other R-groups are
             # detached.  So its hash and condition vector are islinked-invariant
             # and can be precomputed here rather than per __getitem__.
-            _W["mol_context"] = {
-                "mol_id": record.get("mol_id", ""),
-                "inchikey": (record.get("meta") or {}).get("standard_inchi_key", ""),
-                "mw": (record.get("meta") or {}).get("molecular_weight"),
-                "contains_sugar": (record.get("meta") or {}).get("contains_sugar") == "True",
-            }
+            _W["mol_context"] = _mol_context(mol_id, meta)
             hashes, condvecs = [], []
             for rgroup in dec.rgroups:
                 try:
