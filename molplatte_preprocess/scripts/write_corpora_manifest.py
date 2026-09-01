@@ -27,7 +27,9 @@ def build_tag(meta):
     return (f"r{str(round(r,3)).replace('0.','')}"
             f"-m{p.get('min_rgroup_atoms','?')}"
             f"-h{meta.get('graph_hash_version','?')}"
-            f"-{meta.get('condvec_mode','?')}{meta.get('condvec_dim','')}")
+            f"-{meta.get('condvec_mode','?')}{meta.get('condvec_dim','')}"
+            # absent => v1, the pre-2026-09 build whose condvec was a bare MW>350 bit
+            f"v{meta.get('condvec_version', 1)}")
 
 def scan():
     out = []

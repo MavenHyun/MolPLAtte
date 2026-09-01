@@ -124,6 +124,11 @@ def _init_worker(config: dict) -> None:
     )
 
 
+def _condvec_version() -> int:
+    from molplatte_prep.condvec import CONDVEC_VERSION
+    return CONDVEC_VERSION
+
+
 def _build_condvec(config):
     """Condvec encoder for a worker, loading flavor tables when needed."""
     mode = config["condvec_mode"]
@@ -658,6 +663,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         "flavor_mined": args.flavor_mined,
         "pocket_dim": args.pocket_dim,
         "condvec_dim": condvec_dim,
+        "condvec_version": _condvec_version(),
         "sample_fraction": args.sample_fraction,
         "sample_seed": args.sample_seed,
         "layout": args.layout,

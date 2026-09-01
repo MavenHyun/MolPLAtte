@@ -360,6 +360,13 @@ def load_flavor_tables(measured_path=None, mined_path=None):
     return meas, mined
 
 
+#: Content version of the flavor condition vector. Bump whenever the MEANING of
+#: the bits changes, so two corpora with the same mode+dim are still marked
+#: incomparable. v1 corpora are unusable for conditioning: mol_context was read
+#: from a record that had no `meta` yet, so no label table was ever consulted and
+#: all 24 bits collapsed to a single MW>350 indicator (fixed 2026-09).
+CONDVEC_VERSION = 2
+
 CONDVEC_MODES = ("neutral", "pocket", "flavor", "two_part")
 
 
