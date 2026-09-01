@@ -202,6 +202,26 @@ class RGroupLibraryRetrieval(pl.Callback):
     # Rebuild + score
     # ------------------------------------------------------------------ #
     @torch.no_grad()
+
+    def _novel_row_mask(self):
+        """Boolean over library rows: True where the R-group is NOT in the base
+        vocabulary. ``None`` unless the loaded library is a union build."""
+        if getattr(self, "_novel_rows", None) is not None:
+            return self._novel_rows
+        prov = getattr(self._vocab, "provenance", None) or {}
+        novel = prov.get("novel_hashes")
+        if not novel:
+            self._novel_rows = None
+            return None
+        novel = set(novel)
+        self._novel_rows = np.array([h in novel for h in self._vocab.hashes], dtype=bool)
+        logger.info(
+            "[RGroupLibraryRetrieval] union library: %s of %s rows are novel "
+            "(absent from the base vocabulary); hit@K reported split",
+            f"{int(self._novel_rows.sum()):,}", f"{len(self._novel_rows):,}",
+        )
+        return self._novel_rows
+
     def _build_library(self, pl_module) -> Optional[np.ndarray]:
         model = pl_module.model.model  # LightningModule -> LossModule -> nnet
         was_training = model.training
@@ -367,6 +387,20 @@ class RGroupLibraryRetrieval(pl.Callback):
                 np.where(chas, 1.0 / np.maximum(cfirst, 1), 0.0).mean()
             )
 
+        # ---- base vs novel R-groups (union libraries) -----------------------
+        # When the library is a UNION of the pretraining vocabulary and a new
+        # corpus (see scripts/build_union_vocab.py), a single averaged hit@K
+        # hides the question the pocket stage exists to answer: does the model
+        # retrieve R-groups it never saw in pretraining, or only the familiar
+        # ones? 40% of CrossDocked's distinct R-groups are novel, but they are
+        # RARE, so they contribute little to a micro average and the headline
+        # number would stay comfortable while novel retrieval failed outright.
+        novel_mask = self._novel_row_mask()
+        if novel_mask is not None:
+            is_novel = novel_mask[target_rows]
+            metrics[f"{stage}/library/n_queries_novel"] = float(is_novel.sum())
+            metrics[f"{stage}/library/n_queries_base"] = float((~is_novel).sum())
+
         summary = []
         for cut in _KS:
             if cut > k:
@@ -375,6 +409,12 @@ class RGroupLibraryRetrieval(pl.Callback):
             prior = self._vocab.prior_hit_at_k(target_rows, cut)
             metrics[f"{stage}/library/hit@{cut}"] = hit
             metrics[f"{stage}/library/prior_hit@{cut}"] = prior
+            if novel_mask is not None:
+                for sub, m in (("novel", is_novel), ("base", ~is_novel)):
+                    if m.any():
+                        metrics[f"{stage}/library/{sub}_hit@{cut}"] = float(
+                            hits[m][:, :cut].any(axis=1).mean()
+                        )
             if corrected is not None:
                 chit = float(chits[:, :cut].any(axis=1).mean())
                 metrics[f"{stage}/library/corrected_hit@{cut}"] = chit

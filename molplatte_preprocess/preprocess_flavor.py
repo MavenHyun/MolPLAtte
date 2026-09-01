@@ -352,7 +352,8 @@ def _source_items(args, size_filter: SizeFilter, skip: set) -> Iterator[tuple]:
     """
     rng = random.Random(args.sample_seed)
     emitted = 0
-    paths = {"flavordb": args.flavordb_path, "coconut": args.coconut_path}
+    paths = {"flavordb": args.flavordb_path, "coconut": args.coconut_path,
+             "crossdocked": args.crossdocked_path}
     # Optional id whitelist. FlavorDB records are exempt: they are labelled by
     # construction, so the filter exists to thin the COCONUT half.
     include = None
@@ -400,12 +401,14 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     source.add_argument(
         "--source",
         nargs="+",
-        choices=("flavordb", "coconut"),
+        choices=("flavordb", "coconut", "crossdocked"),
         required=True,
         help="one or more sources; several are merged into a single corpus",
     )
     source.add_argument("--flavordb-path", default=None)
     source.add_argument("--coconut-path", default=None)
+    source.add_argument("--crossdocked-path", default=None,
+                        help="processed pocket10 LMDB; default is the one in ~/datasets")
     source.add_argument(
         "--no-dedup",
         action="store_true",
@@ -553,7 +556,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         ("sources", " + ".join(args.source)),
         ("source paths", {
             k: v for k, v in
-            [("flavordb", args.flavordb_path), ("coconut", args.coconut_path)]
+            [("flavordb", args.flavordb_path), ("coconut", args.coconut_path),
+             ("crossdocked", args.crossdocked_path)]
             if k in args.source
         } or "<defaults>"),
         ("dedup", not args.no_dedup),

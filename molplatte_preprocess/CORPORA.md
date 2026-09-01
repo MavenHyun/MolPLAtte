@@ -21,6 +21,7 @@ A `HASH_VERSION` mismatch is enforced at load time: the stored `rgroup_hashes`, 
 | `coconut-flavordb-full` | active | 393,066 | 86,385 | 889 | 2.3 GB | `r333-m2-h4-flavor24v2` |
 | `coconut-flavordb_v7` | superseded | 393,066 | 86,385 | 889 | 2.3 GB | `r333-m2-h4-flavor24v1` |
 | `coconut-only` | active | 374,454 | 82,312 | 853 | 2.2 GB | `r333-m2-h4-flavor24v2` |
+| `crossdocked` | active | 11,099 | 9,563 | 1443 | 0.1 GB | `r333-m2-h4-flavor24v2` |
 | `flavordb-only` | active | 20,812 | 6,182 | 299 | 0.1 GB | `r333-m2-h4-flavor24v2` |
 
 ## What each is for
@@ -40,6 +41,10 @@ Same content as coconut-flavordb-full. Retained because the three-arm condvec sh
 ### `coconut-only` — active
 
 COCONUT alone. Natural-product chemistry with almost no flavor labels. The contrast arm for anything claiming a flavor effect.
+
+### `crossdocked` — active
+
+CrossDocked2020 ligands from the processed pocket10 LMDB, ONE RECORD PER DISTINCT LIGAND (11,735 ligands behind 166,500 pocket-ligand pairs; mean 14.2x reuse, max 1,100). Pair-level records would multiply R-group counts by that factor and corrupt both the frequency prior and the logQ correction, so each record instead carries its full pocket key list in meta. Substrate for the pocket-conditioning stage. Effective R-group vocabulary 1,443 -- HIGHER than coconut-flavordb-full's 889 despite 35x fewer records, so retrieval here is harder, not easier.
 
 ### `flavordb-only` — active
 

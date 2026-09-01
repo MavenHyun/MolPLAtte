@@ -38,11 +38,12 @@ import csv
 import io
 import logging
 import os
+import pickle
 import sys
 import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, Iterable, Iterator, Optional, Set, Tuple
+from typing import Dict, Iterable, Iterator, List, Optional, Sequence, Set, Tuple
 
 from rdkit import Chem, RDLogger
 
@@ -53,6 +54,7 @@ __all__ = [
     "SizeFilter",
     "read_flavordb",
     "read_coconut",
+    "read_crossdocked",
     "read_source",
     "SOURCES",
 ]
@@ -324,11 +326,138 @@ def read_coconut(
 
 
 #: ``name -> (reader, default path)``.  Paths are overridable on the CLI.
+def _xd_split(keys: Sequence[str], split_of: Dict[int, str]) -> str:
+    """Split label for a ligand spanning several pocket records.
+
+    ``test`` wins over ``train`` wins over ``unassigned``: a ligand that appears
+    against any held-out pocket must not be trainable, or the CrossDocked test
+    set leaks through ligand-level deduplication.
+    """
+    seen = {split_of.get(int(k), "unassigned") for k in keys if k.isdigit()}
+    for level in ("test", "val", "train"):
+        if level in seen:
+            return level
+    return "unassigned"
+
+
+def read_crossdocked(
+    path: str | Path,
+    size_filter: Optional[SizeFilter] = None,
+    limit: Optional[int] = None,
+    split_path: Optional[str | Path] = None,
+) -> Iterator[SourceRecord]:
+    """Stream CrossDocked2020 ligands from the processed ``pocket10`` LMDB.
+
+    ONE RECORD PER DISTINCT LIGAND, not per pocket-ligand pair. The LMDB holds
+    166,500 records but only 11,735 distinct ligand SMILES -- CrossDocked is a
+    CROSS-docking set, so the mean ligand appears against 14.2 different pockets
+    and one appears against 1,100. Emitting pairs would multiply every R-group's
+    corpus count by that factor, unevenly, which corrupts two things that read
+    those counts: the frequency prior that Hit@K is judged against, and the
+    logQ correction, whose whole job is to subtract log p(k).
+
+    The pocket side is not discarded -- each record carries the full list of
+    LMDB keys whose pocket binds it, so the pocket-conditioning stage can expand
+    one ligand back into its pairs without re-reading the LMDB.
+
+    meta
+        ``n_pockets``      how many pockets bind this ligand
+        ``pocket_keys``    comma-joined LMDB keys for those pairs
+        ``protein_file``   representative pocket (first key's protein_filename)
+        ``ligand_file``    representative ligand path inside CrossDocked
+        ``split``          train/test/unassigned, from the pose split file
+
+    Yields ``mol_id = "XD<first-lmdb-key>"``.
+    """
+    path = Path(path)
+    if not path.is_file():
+        raise FileNotFoundError(f"CrossDocked LMDB not found at {path}")
+    try:
+        import lmdb
+    except ImportError as exc:  # pragma: no cover
+        raise ImportError("read_crossdocked needs `lmdb` (pip install lmdb)") from exc
+
+    split_of: Dict[int, str] = {}
+    sp = Path(split_path) if split_path else path.parent / "crossdocked_pocket10_pose_split.pt"
+    if sp.is_file():
+        try:
+            import torch
+
+            for name, idxs in torch.load(sp, weights_only=False).items():
+                for i in idxs:
+                    split_of[int(i)] = name
+        except Exception as exc:  # noqa: BLE001
+            logging.warning("[crossdocked] could not read split %s: %s", sp, exc)
+
+    sf = size_filter or SizeFilter()
+    env = lmdb.open(str(path), readonly=True, lock=False, subdir=False, max_readers=64)
+
+    # pass 1: group pocket keys by ligand SMILES, holding only strings
+    order: List[str] = []
+    keys_of: Dict[str, List[str]] = {}
+    files_of: Dict[str, Tuple[str, str]] = {}
+    with env.begin() as txn:
+        for raw_key, raw_val in txn.cursor():
+            try:
+                rec = pickle.loads(raw_val)
+            except Exception:
+                continue
+            smi = (rec.get("ligand_smiles") or "").strip()
+            if not smi:
+                continue
+            k = raw_key.decode()
+            if smi not in keys_of:
+                keys_of[smi] = []
+                order.append(smi)
+                files_of[smi] = (str(rec.get("protein_filename") or ""),
+                                 str(rec.get("ligand_filename") or ""))
+            keys_of[smi].append(k)
+    env.close()
+    logging.info("[crossdocked] %s pockets over %s distinct ligands (%.1fx reuse)",
+                 f"{sum(len(v) for v in keys_of.values()):,}", f"{len(order):,}",
+                 sum(len(v) for v in keys_of.values()) / max(len(order), 1))
+
+    emitted = 0
+    for smi in order:
+        mol = Chem.MolFromSmiles(smi)
+        if mol is None or not sf.accepts(mol):
+            continue
+        ks = keys_of[smi]
+        prot, lig = files_of[smi]
+        first = ks[0]
+        yield SourceRecord(
+            mol_id=f"XD{first}",
+            smiles=smi,
+            source="crossdocked",
+            meta={
+                "n_pockets": str(len(ks)),
+                "pocket_keys": ",".join(ks),
+                "protein_file": prot,
+                "ligand_file": lig,
+                # Split over ALL of this ligand's pockets, with test taking
+                # precedence. 86 ligands bind both train and test pockets, and
+                # deduplicating to one record per ligand would otherwise place
+                # them in train and leak the official test set.
+                "split": _xd_split(ks, split_of),
+            },
+        )
+        emitted += 1
+        if limit is not None and emitted >= limit:
+            return
+
+
 SOURCES: Dict[str, Tuple[object, str]] = {
     "flavordb": (read_flavordb, os.path.expanduser("~/datasets/flavordb")),
     "coconut": (
         read_coconut,
         os.path.expanduser("~/datasets/coconut/coconut_sdf_3d-08-2026.sdf"),
+    ),
+    "crossdocked": (
+        read_crossdocked,
+        os.path.expanduser(
+            "~/datasets/crossdocked2020/"
+            "crossdocked_v1.1_rmsd1.0_pocket10_processed_final.lmdb"
+        ),
     ),
 }
 
