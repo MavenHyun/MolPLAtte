@@ -27,7 +27,7 @@ A `HASH_VERSION` mismatch is enforced at load time: the stored `rgroup_hashes`, 
 
 ### `coconut-flavordb-filtered` — active
 
-Both sources, COCONUT restricted to the odorant physicochemical envelope (MW 108-290, logP 0.4-4.5, TPSA<=53) derived from FlavorDB's own non-imputed labels, plus every known-flavor compound. 10.6% known-flavor density against a 0.62% base rate -- 17x enriched. Intended for pocket finetuning and flavor conditioning.
+Both sources, COCONUT restricted to the odorant physicochemical envelope (MW 108-290, logP 0.4-4.5, TPSA<=53) derived from the 2,141 FlavorDB compounds with a measured non-sweet sensory label, UNION every known-flavor compound. The envelope keeps 7.7% of COCONUT and raises known-flavor density from a 0.66% base rate to 4.00% -- 6.1x enriched -- at the cost of rejecting 45% of real odorants, which the union with known-flavor compounds repairs. (The union's own 5.98% density is partly circular and should not be quoted as the filter's enrichment.) See docs/coconut_filtering_rationale.pdf. Intended for pocket finetuning and flavor conditioning.
 
 ### `coconut-flavordb-full` — active
 
