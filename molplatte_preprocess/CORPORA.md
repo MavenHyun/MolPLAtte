@@ -18,14 +18,10 @@ A `HASH_VERSION` mismatch is enforced at load time: the stored `rgroup_hashes`, 
 | corpus | status | records | vocab | eff. | size | build tag |
 |---|---|---:|---:|---:|---:|---|
 | `coconut-flavordb-filtered` | active | 50,933 | 13,178 | 467 | 0.3 GB | `r333-m2-h4-flavor24v2` |
-| `coconut-flavordb-filtered.bak` | UNDOCUMENTED | 50,933 | 13,178 | 467 | 0.3 GB | `r333-m2-h4-flavor24v1` |
 | `coconut-flavordb-full` | active | 393,066 | 86,385 | 889 | 2.3 GB | `r333-m2-h4-flavor24v2` |
-| `coconut-flavordb-full.bak` | UNDOCUMENTED | 393,066 | 86,385 | 889 | 2.3 GB | `r333-m2-h4-flavor24v1` |
 | `coconut-flavordb_v7` | superseded | 393,066 | 86,385 | 889 | 2.3 GB | `r333-m2-h4-flavor24v1` |
 | `coconut-only` | active | 374,454 | 82,312 | 853 | 2.2 GB | `r333-m2-h4-flavor24v2` |
-| `coconut-only.bak` | UNDOCUMENTED | 374,454 | 82,312 | 853 | 2.2 GB | `r333-m2-h4-flavor24v1` |
 | `flavordb-only` | active | 20,812 | 6,182 | 299 | 0.1 GB | `r333-m2-h4-flavor24v2` |
-| `flavordb-only.bak` | UNDOCUMENTED | 20,812 | 6,182 | 299 | 0.1 GB | `r333-m2-h4-flavor24v1` |
 
 ## What each is for
 
@@ -33,17 +29,9 @@ A `HASH_VERSION` mismatch is enforced at load time: the stored `rgroup_hashes`, 
 
 Both sources, COCONUT restricted to the odorant physicochemical envelope (MW 108-290, logP 0.4-4.5, TPSA<=53) derived from the 2,141 FlavorDB compounds with a measured non-sweet sensory label, UNION every known-flavor compound. The envelope keeps 7.7% of COCONUT and raises known-flavor density from a 0.66% base rate to 4.00% -- 6.1x enriched -- at the cost of rejecting 45% of real odorants, which the union with known-flavor compounds repairs. (The union's own 5.98% density is partly circular and should not be quoted as the filter's enrichment.) See docs/coconut_filtering_rationale.pdf. Intended for pocket finetuning and flavor conditioning.
 
-### `coconut-flavordb-filtered.bak` — UNDOCUMENTED
-
-Not described in write_corpora_manifest.py. Either document it or delete it.
-
 ### `coconut-flavordb-full` — active
 
 Both sources, unfiltered. The default pretraining corpus.
-
-### `coconut-flavordb-full.bak` — UNDOCUMENTED
-
-Not described in write_corpora_manifest.py. Either document it or delete it.
 
 ### `coconut-flavordb_v7` — superseded
 
@@ -53,17 +41,9 @@ Same content as coconut-flavordb-full. Retained because the three-arm condvec sh
 
 COCONUT alone. Natural-product chemistry with almost no flavor labels. The contrast arm for anything claiming a flavor effect.
 
-### `coconut-only.bak` — UNDOCUMENTED
-
-Not described in write_corpora_manifest.py. Either document it or delete it.
-
 ### `flavordb-only` — active
 
 FlavorDB alone. Every molecule carries a measured flavor label, so the condvec is dense. Small; use for conditioning experiments where label coverage matters more than scale.
-
-### `flavordb-only.bak` — UNDOCUMENTED
-
-Not described in write_corpora_manifest.py. Either document it or delete it.
 
 ## Shared build settings
 
