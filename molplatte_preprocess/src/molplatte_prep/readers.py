@@ -322,7 +322,12 @@ def read_coconut(
         yield SourceRecord(base_id, smiles, "coconut", meta)
         emitted += 1
         if limit is not None and emitted >= limit:
-            return
+            break
+    if dropped:
+        logging.info("[crossdocked] dropped %s non-drug-like ligands: %s",
+                     f"{sum(dropped.values()):,}",
+                     ", ".join(f"{k} {v}" for k, v in
+                               sorted(dropped.items(), key=lambda x: -x[1])))
 
 
 #: ``name -> (reader, default path)``.  Paths are overridable on the CLI.
@@ -345,6 +350,8 @@ def read_crossdocked(
     size_filter: Optional[SizeFilter] = None,
     limit: Optional[int] = None,
     split_path: Optional[str | Path] = None,
+    drug_like: bool = True,
+    keep_cofactors: bool = False,
 ) -> Iterator[SourceRecord]:
     """Stream CrossDocked2020 ligands from the processed ``pocket10`` LMDB.
 
@@ -367,8 +374,23 @@ def read_crossdocked(
         ``ligand_file``    representative ligand path inside CrossDocked
         ``split``          train/test/unassigned, from the pose split file
 
+    drug_like
+        Drop crystallographic artifacts -- cryoprotectants, buffers, ions,
+        detergents and nucleotide cofactors -- identified by the PDB chemical
+        component code embedded in ``ligand_filename``. Removes 4.0% of distinct
+        ligands but 11.3% of pocket pairs, because artifacts are exactly the
+        high-reuse head (ADP appears against 1,903 pockets, SAH 1,121, the MRD
+        cryoprotectant 640). See :mod:`molplatte_prep.pocket_ligands`.
+
+    keep_cofactors
+        Re-admit ATP/NAD/SAH and friends. They are genuine cognate ligands for
+        the enzymes that use them, so this is a real choice rather than a
+        loosening -- but they bind almost everything, so they are excluded by
+        default.
+
     Yields ``mol_id = "XD<first-lmdb-key>"``.
     """
+    from .pocket_ligands import assess_ligand, ccd_code_from_path
     path = Path(path)
     if not path.is_file():
         raise FileNotFoundError(f"CrossDocked LMDB not found at {path}")
@@ -418,12 +440,23 @@ def read_crossdocked(
                  sum(len(v) for v in keys_of.values()) / max(len(order), 1))
 
     emitted = 0
+    dropped: Dict[str, int] = {}
     for smi in order:
         mol = Chem.MolFromSmiles(smi)
         if mol is None or not sf.accepts(mol):
             continue
         ks = keys_of[smi]
         prot, lig = files_of[smi]
+        code = ccd_code_from_path(lig)
+        if drug_like:
+            verdict = assess_ligand(
+                mol, code, keep_cofactors=keep_cofactors,
+                min_heavy_atoms=sf.min_heavy_atoms,
+                max_heavy_atoms=sf.max_heavy_atoms,
+            )
+            if not verdict.ok:
+                dropped[verdict.reason] = dropped.get(verdict.reason, 0) + 1
+                continue
         first = ks[0]
         yield SourceRecord(
             mol_id=f"XD{first}",
@@ -439,6 +472,7 @@ def read_crossdocked(
                 # deduplicating to one record per ligand would otherwise place
                 # them in train and leak the official test set.
                 "split": _xd_split(ks, split_of),
+                "ccd": code or "",
             },
         )
         emitted += 1

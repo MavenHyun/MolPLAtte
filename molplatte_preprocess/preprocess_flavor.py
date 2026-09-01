@@ -363,8 +363,12 @@ def _source_items(args, size_filter: SizeFilter, skip: set) -> Iterator[tuple]:
         logging.info("[info] include_ids      : %s ids from %s",
                      f"{len(include):,}", args.include_ids)
     for source in args.source:
+        kw = {}
+        if source == "crossdocked":
+            kw = {"drug_like": not args.keep_artifact_ligands,
+                  "keep_cofactors": args.keep_cofactors}
         for record in read_source(
-            source, paths.get(source), size_filter=size_filter
+            source, paths.get(source), size_filter=size_filter, **kw
         ):
             if args.sample_fraction is not None and rng.random() >= args.sample_fraction:
                 continue
@@ -407,6 +411,13 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     )
     source.add_argument("--flavordb-path", default=None)
     source.add_argument("--coconut-path", default=None)
+    source.add_argument("--keep-artifact-ligands", action="store_true",
+                        help="crossdocked: keep crystallographic artifacts "
+                             "(cryoprotectants, buffers, ions, detergents, "
+                             "nucleotide cofactors). Off by default.")
+    source.add_argument("--keep-cofactors", action="store_true",
+                        help="crossdocked: re-admit ATP/NAD/SAH-type cofactors "
+                             "only; other artifacts stay filtered.")
     source.add_argument("--crossdocked-path", default=None,
                         help="processed pocket10 LMDB; default is the one in ~/datasets")
     source.add_argument(
@@ -668,6 +679,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         "pocket_dim": args.pocket_dim,
         "condvec_dim": condvec_dim,
         "condvec_version": _condvec_version(),
+        "drug_like_ligands": ("crossdocked" in args.source
+                              and not args.keep_artifact_ligands),
+        "keep_cofactors": args.keep_cofactors,
         "sample_fraction": args.sample_fraction,
         "sample_seed": args.sample_seed,
         "layout": args.layout,
