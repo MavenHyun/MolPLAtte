@@ -219,7 +219,7 @@ class DataModuleConfig:
     """
 
     dataset_path: Optional[Path] = None
-    dataset_version: str = "coconut-flavordb_v5"
+    dataset_version: str = "coconut-flavordb-full"
     decomposition_method: str = "naveja_recap"
     batch_size: int = 512
     num_workers: int = 8
@@ -231,6 +231,11 @@ class DataModuleConfig:
     prefetch_factor: int = 2
     condvec_mode: str = "neutral"
     condvec_dim: int = 97
+    #: Permute condition vectors across molecules. Diagnostic ONLY -- a run
+    #: with this on is not a valid model, it measures whether the condition
+    #: carries signal (unchanged retrieval = ignored; collapse = informative
+    #: or, for an R-group-derived vector, leaking).
+    shuffle_condvec: bool = False
     max_rgroups: int = 8
     #: Derive pre-mask joint chemistry for the assembly head. Costs a little
     #: CPU per __getitem__ and nothing on disk; off unless the head is enabled.
@@ -270,6 +275,7 @@ class MolPalleteDataModule(pl.LightningDataModule):
         dataset = MolPalleteDataset(
             self.config.dataset_path,
             condvec_dim=self.config.condvec_dim,
+            shuffle_condvec=self.config.shuffle_condvec,
             max_rgroups=self.config.max_rgroups,
             seed=self.config.seed,
             need_assembly_targets=self.config.need_assembly_targets,

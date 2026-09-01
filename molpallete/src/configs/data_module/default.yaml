@@ -7,7 +7,7 @@
 data_module: MolPalleteDataModule
 data_module_kwargs:
   dataset_path:           null
-  dataset_version:        coconut-flavordb_v5
+  dataset_version:        coconut-flavordb-full
   # naveja_recap, rebuilt on the fragment tree. This comment previously argued
   # for macfrag because naveja_recap was measured at 99.42% single-R-group and
   # that was believed structural. It was an implementation artefact: the old
@@ -43,6 +43,13 @@ data_module_kwargs:
   # shows up as collapsed retrieval rather than plausible noise.
   condvec_mode:           neutral
   condvec_dim:            0
+  # Shuffle test: permute condition vectors across molecules. DIAGNOSTIC ONLY --
+  # a run with this on is not a valid model. Read against the unshuffled arm:
+  # unchanged retrieval means the condition is being ignored; a collapse means it
+  # carries information the model cannot otherwise reach. For an R-group-derived
+  # condvec that collapse would indicate LEAKAGE, which is how the original
+  # 97-bit fragment vector should have been caught.
+  shuffle_condvec:        false
   # Cap on detached R-groups per instance, i.e. rows contributed to the
   # per-linker retrieval loss.
   max_rgroups:            8

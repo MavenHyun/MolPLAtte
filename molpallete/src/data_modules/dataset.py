@@ -114,6 +114,7 @@ class MolPalleteDataset(Dataset):
         self,
         dataset_path: str | Path,
         condvec_dim: int = 97,
+        shuffle_condvec: bool = False,
         max_rgroups: int = 8,
         seed: Optional[int] = None,
         need_assembly_targets: bool = False,
@@ -143,9 +144,21 @@ class MolPalleteDataset(Dataset):
         self.layout: str = meta.get("layout", "hash3")
         self.method: str = meta.get("method", "unknown")
         self.condvec_dim = condvec_dim
+        self.shuffle_condvec = bool(shuffle_condvec)
         self.max_rgroups = max_rgroups
         self.need_assembly_targets = need_assembly_targets
         self.ids: List[str] = list(meta["ids"])
+        if self.shuffle_condvec:
+            # Built HERE, after self.ids exists. Seeded and fixed, so the wrong
+            # condition is stable across epochs rather than resampled each pass.
+            import numpy as _np
+            _rng = _np.random.default_rng(20260831)
+            self._shuffle_perm = _rng.permutation(len(self.ids))
+            logging.getLogger(__name__).warning(
+                "[MolPalleteDataset] SHUFFLE TEST ACTIVE -- condition vectors are "
+                "permuted across molecules. This run measures whether the condition "
+                "carries signal; it is NOT a valid model."
+            )
         self._rng = random.Random(seed)
 
         if sampling_unit not in ("decomposition", "molecule"):
@@ -361,6 +374,34 @@ class MolPalleteDataset(Dataset):
 
         detached = instance.detached_indices
         condvecs = torch.as_tensor(decomp["rgroup_condvecs"])[list(detached)].float()
+        if self.shuffle_condvec:
+            # SHUFFLE TEST. Replace this instance's condition with one drawn from
+            # a different molecule, deterministically by instance index so the
+            # permutation is fixed across epochs rather than resampled.
+            #
+            # Read against the unshuffled baseline:
+            #   unchanged retrieval  -> the condition is being IGNORED; the bits
+            #                           are dead weight and should be dropped.
+            #   large collapse       -> the condition was carrying information the
+            #                           model could not otherwise get. For a
+            #                           molecule-level flavor vector that is the
+            #                           intended behaviour; for anything derived
+            #                           from the R-group it means LEAKAGE.
+            # This single diagnostic would have caught the original 97-bit
+            # fragment condvec immediately instead of after a full seed sweep.
+            # Key off the molecule id, not a loop index: _to_sample has no
+            # positional index in scope, and an id-derived key also keeps the
+            # permutation stable regardless of sampling order.
+            _k = abs(hash(record.get("mol_id", ""))) % max(len(self._shuffle_perm), 1)
+            other = int(self._shuffle_perm[_k])
+            try:
+                alt = self._load(other)
+                pool = torch.as_tensor(alt["decompositions"][0]["rgroup_condvecs"]).float()
+                if pool.numel():
+                    row = pool[_k % pool.shape[0]]
+                    condvecs = row.unsqueeze(0).repeat(condvecs.shape[0], 1)
+            except (KeyError, IndexError, FileNotFoundError):
+                pass
         hashes = [decomp["rgroup_hashes"][i] for i in detached]
 
         return MolPalleteSample(

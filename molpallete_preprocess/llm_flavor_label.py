@@ -33,10 +33,13 @@ import io
 import json
 import os
 import random
+import re
+import ssl
 import sys
 import time
 import urllib.error
 import urllib.request
+import http.client
 import zipfile
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Set, Tuple
@@ -47,6 +50,20 @@ API = "https://openrouter.ai/api/v1/chat/completions"
 #: server's own message rather than being retried and then silently degraded to
 #: "no annotation" by the caller -- a partial run that looks complete is worse
 #: than a crash.
+#: Network exceptions that are worth retrying. urllib raises more than the
+#: three obvious ones: a truncated chunked response surfaces as
+#: http.client.IncompleteRead, which is NOT a URLError and so escaped the
+#: original handler and killed a 78K run at 93% completion. ConnectionError
+#: covers reset/aborted sockets, ssl.SSLError covers handshake flakiness.
+_RETRYABLE_NET = (
+    urllib.error.HTTPError,
+    urllib.error.URLError,
+    TimeoutError,
+    http.client.HTTPException,   # IncompleteRead, BadStatusLine, ...
+    ConnectionError,
+    ssl.SSLError,
+)
+
 _FATAL_HTTP = {
     400: "malformed request",
     401: "bad or missing API key",
@@ -121,7 +138,7 @@ def _post(payload: dict, key: str, retries: int = 4) -> dict:
         try:
             with urllib.request.urlopen(req, timeout=180) as r:
                 return json.loads(r.read())
-        except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError) as e:
+        except _RETRYABLE_NET as e:
             code = getattr(e, "code", None)
             # FAIL FAST, LOUDLY. None of these can be fixed by waiting, and
             # retrying them wastes four backoff sleeps per call before failing
@@ -321,3 +338,141 @@ def score(pred: Dict[str, List[str]], items: Sequence[dict]) -> dict:
         "f1": 2 * prec * rec / (prec + rec) if prec + rec else 0.0,
         "any_hit_rate": exact / max(scored, 1),
     }
+
+
+# --------------------------------------------------------------------------
+# production run: per-molecule, concurrent, resumable
+# --------------------------------------------------------------------------
+
+def _one(model: str, rec: dict, key: str, max_tokens: int) -> Tuple[str, Optional[dict], float]:
+    """Annotate a single compound. Never raises for survivable failures."""
+    line = f"  id={rec['id']}; SMILES={rec['smiles']}; name={rec.get('name') or '(none)'}"
+    if rec.get("class"):
+        line += f"; class={rec['class']}"
+    if rec.get("mw"):
+        line += f"; MW={rec['mw']}"
+    payload = {
+        "model": model, "temperature": 0, "max_tokens": max_tokens,
+        "messages": [{"role": "system", "content": _SYSTEM_PROMPT()},
+                     {"role": "user", "content": "Annotate these compounds:\n" + line}],
+    }
+    resp = _post(payload, key)            # fatal HTTP aborts the whole run
+    cost = float((resp.get("usage") or {}).get("cost", 0.0) or 0.0)
+    if resp.get("error"):
+        ask.n_error += 1
+        return rec["id"], None, cost
+    try:
+        txt = resp["choices"][0]["message"].get("content")
+    except (KeyError, IndexError, TypeError):
+        ask.n_malformed += 1
+        return rec["id"], None, cost
+    if not txt:
+        ask.n_empty += 1
+        return rec["id"], None, cost
+    txt = txt.strip()
+    if txt.startswith("```"):
+        txt = txt.split("```")[1]
+        txt = txt[4:] if txt.lower().startswith("json") else txt
+    s, e = txt.find("{"), txt.rfind("}")
+    if s < 0:
+        ask.n_malformed += 1
+        return rec["id"], None, cost
+    try:
+        data = json.loads(txt[s:e + 1])
+    except json.JSONDecodeError:
+        ask.n_malformed += 1
+        return rec["id"], None, cost
+    rs = data.get("results") or [data]
+    return rec["id"], (rs[0] if rs else None), cost
+
+
+def _SYSTEM_PROMPT() -> str:
+    """The reviewed prompt, read from docs/ so there is ONE copy under review."""
+    p = Path(__file__).resolve().parent / "docs" / "flavor_annotation_prompt.md"
+    t = p.read_text()
+    return t.split("## System", 1)[1].split("## User", 1)[0].strip()
+
+
+def run_label(args) -> None:
+    import csv as _csv, threading, time as _time
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    _csv.field_size_limit(sys.maxsize)
+    key = _api_key()
+
+    with open(args.targets, newline="") as fh:
+        rows = list(_csv.DictReader(fh))
+    if args.named_only:
+        # Search and recall both yielded 0/50 on unnamed compounds across three
+        # conditions; the entire measured yield lives in the named half. A bare
+        # catalogue code (SCHEMBL/ZINC/CID/CAS) is not a name for this purpose.
+        cat = re.compile(r"^(SCHEMBL|ZINC|CID |AC1|CHEMBL|NSC|MFCD|\d{2,7}-\d{2}-\d)", re.I)
+        rows = [r for r in rows
+                if (r.get("name") or "").strip() and not cat.match(r["name"].strip())]
+
+    done = set()
+    out_path = Path(args.out)
+    if out_path.exists() and not args.overwrite:
+        with out_path.open() as fh:
+            for line in fh:
+                try: done.add(json.loads(line)["id"])
+                except Exception: pass
+    todo = [r for r in rows if r["id"] not in done]
+    print(f"[label] {len(rows):,} candidates, {len(done):,} already done, "
+          f"{len(todo):,} to run  (model {args.model}, {args.workers} workers)", flush=True)
+    if not todo:
+        return
+
+    lock = threading.Lock()
+    fh = out_path.open("a")
+    n = 0; cost = 0.0; ndoc = 0; t0 = _time.time()
+    with ThreadPoolExecutor(max_workers=args.workers) as ex:
+        futs = [ex.submit(_one, args.model, r, key, args.max_tokens) for r in todo]
+        by_id = {r["id"]: r for r in todo}
+        for f in as_completed(futs):
+            rid, res, c = f.result()
+            src = by_id[rid]
+            rec = {"id": rid, "smiles": src["smiles"], "name": src.get("name", ""),
+                   "class": src.get("class", ""), "mw": src.get("mw", ""),
+                   "inchikey": src.get("inchikey", ""), "bucket": src.get("bucket", "")}
+            if res:
+                rec.update({k: res.get(k) for k in
+                            ("labels", "confidence", "evidence", "source", "analog", "reasoning")})
+            else:
+                rec.update({"labels": None, "evidence": "no_response"})
+            with lock:
+                fh.write(json.dumps(rec) + "\n"); n += 1; cost += c
+                if rec.get("evidence") == "documented" and (rec.get("labels") or []) != ["unknown"]:
+                    ndoc += 1
+                if n % 500 == 0:
+                    fh.flush()
+                    rate = n / max(_time.time() - t0, 1)
+                    print(f"  {n:,}/{len(todo):,}  documented {ndoc:,}  ${cost:.2f}  "
+                          f"{rate:.1f}/s  eta {(len(todo)-n)/max(rate,.01)/60:.0f}m",
+                          flush=True)
+    fh.close()
+    print(f"[label] done: {n:,} annotated, {ndoc:,} documented ({ndoc/max(n,1):.2%}), "
+          f"${cost:.2f}", flush=True)
+    print(f"[label] failures — error {ask.n_error}, malformed {ask.n_malformed}, "
+          f"empty {ask.n_empty}", flush=True)
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser(description=__doc__,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    lb = sub.add_parser("label", help="annotate a target CSV")
+    lb.add_argument("--targets", default="docs/flavor_annotation_targets.csv")
+    lb.add_argument("--out", default="flavor_annotations.jsonl")
+    lb.add_argument("--model", default="deepseek/deepseek-v4-flash")
+    lb.add_argument("--workers", type=int, default=24)
+    lb.add_argument("--max-tokens", type=int, default=1200)
+    lb.add_argument("--named-only", action="store_true",
+                    help="skip compounds whose only identifier is a catalogue code")
+    lb.add_argument("--overwrite", action="store_true")
+    a = ap.parse_args()
+    if a.cmd == "label":
+        run_label(a)
+
+
+if __name__ == "__main__":
+    main()

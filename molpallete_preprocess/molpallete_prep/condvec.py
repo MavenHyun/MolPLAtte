@@ -39,6 +39,10 @@ from rdkit.Chem import Fragments
 
 __all__ = [
     "CondVecEncoder",
+    "FlavorCondVec",
+    "TwoPartCondVec",
+    "FLAVOR_LABELS",
+    "load_flavor_tables",
     "NeutralCondVec",
     "PocketCondVec",
     "FLAVOR_SMARTS",
@@ -194,7 +198,169 @@ class PocketCondVec(CondVecEncoder):
         return np.zeros(self._dim, dtype=np.float32)
 
 
-CONDVEC_MODES = ("neutral", "pocket")
+#: The 24 flavor bits. Folded from FlavorDB's 715 raw descriptors (253 of them
+#: singletons, 67% of mass on sweet/sweet-like); this set covers 94.3% of
+#: genuine non-imputed assignments. Order is FIXED -- it is the wire format.
+FLAVOR_LABELS: Sequence[str] = (
+    "sweet", "bitter", "sour", "salty", "umami",
+    "fruity", "green", "floral", "fatty", "woody", "spicy", "roasted",
+    "sulfurous", "earthy", "nutty", "herbal", "medicinal", "citrus",
+    "dairy", "alcoholic", "meaty", "minty",
+    "odorless",   # positive claim: cannot volatilise / no perceptible odor
+    "unknown",    # positive claim: no information. NOT the same as odorless.
+)
+_FLAVOR_IDX = {l: i for i, l in enumerate(FLAVOR_LABELS)}
+_ODORLESS_I = _FLAVOR_IDX["odorless"]
+_UNKNOWN_I = _FLAVOR_IDX["unknown"]
+
+#: Molecular weight above which a compound cannot reach an olfactory receptor.
+#: Real odorants (FlavorDB, non-imputed) have median MW 170 with 8.5% above 350;
+#: COCONUT has median 433 with 71.2% above. This is a claim about VOLATILITY and
+#: therefore about odor only -- taste receptors sit in solution and steviosides
+#: are intensely sweet at MW ~800, so a sugar-bearing heavy compound is NOT
+#: assigned odorless-and-nothing-else.
+ODORLESS_MW_CUTOFF = 350.0
+
+
+class FlavorCondVec(CondVecEncoder):
+    """24 sparse flavor bits, sourced from measurement -- never from structure.
+
+    This is the half of the condition vector that must NOT be a function of the
+    molecular graph. The project's original 97-bit RDKit fragment condvec was
+    exactly that, and it leaked: it was computed from the intact molecule G,
+    which contains the R-group retrieval has to predict. Removing it moved
+    rank1_distinct from 680 to 5,851 and coverage from 11.4% to 100%.
+
+    So bits are set from three sources, in priority order, and every one of them
+    is exogenous to the graph:
+
+    1. MEASURED  -- FlavorDB and any other curated sensory database, joined by
+       InChIKey. ~21,387 compounds in coconut-flavordb.
+    2. MINED     -- LLM annotations at the `documented` evidence tier ONLY, i.e.
+       literature recall with a named source (96.4% cite Good Scents, BitterDB
+       or FEMA). `structural` and `close_analog` tiers are DELIBERATELY excluded:
+       both are inferred from the graph and would reintroduce the leak.
+       ~1,927 compounds.
+    3. PHYSICS   -- `odorless` for compounds too heavy to volatilise, which is a
+       statement about physics rather than about missing data. ~208,978
+       compounds. Applies to odor only; heavy sugar-bearing compounds are left
+       unknown because they can still be tasted.
+
+    Anything else gets the `unknown` bit. An ALL-ZERO vector is never emitted:
+    zero would mean "no flavor", and 94% of the corpus being silently labelled
+    flavourless would teach the model to separate FlavorDB-sourced from
+    COCONUT-sourced molecules -- source provenance wearing flavor's clothes,
+    which is the same failure as the original condvec.
+    """
+
+    mode = "flavor"
+
+    def __init__(self,
+                 measured: Optional[Dict[str, Sequence[str]]] = None,
+                 mined: Optional[Dict[str, Sequence[str]]] = None,
+                 mw_cutoff: float = ODORLESS_MW_CUTOFF) -> None:
+        self._measured = measured or {}
+        self._mined = mined or {}
+        self._mw_cutoff = float(mw_cutoff)
+
+    @property
+    def dim(self) -> int:
+        return len(FLAVOR_LABELS)
+
+    def _set(self, labels: Sequence[str]) -> np.ndarray:
+        v = np.zeros(self.dim, dtype=np.float32)
+        for l in labels:
+            i = _FLAVOR_IDX.get(str(l).strip().lower())
+            if i is not None:
+                v[i] = 1.0
+        if not v.any():
+            v[_UNKNOWN_I] = 1.0
+        return v
+
+    def encode(self, mol: Chem.Mol, context: Optional[object] = None) -> np.ndarray:
+        """``context`` is the record dict (needs ``inchikey`` / ``mol_id`` / ``mw``)."""
+        ctx = context if isinstance(context, dict) else {}
+        key = (ctx.get("inchikey") or "").strip()
+        mid = (ctx.get("mol_id") or "").strip()
+
+        for table in (self._measured, self._mined):
+            for k in (key, mid):
+                if k and k in table:
+                    return self._set(table[k])
+
+        # physics: too heavy to be an odorant. Sugar-bearing heavies can still
+        # TASTE, so they stay unknown rather than being called odorless.
+        mw = ctx.get("mw")
+        if mw is None and mol is not None:
+            from rdkit.Chem import Descriptors
+            try: mw = Descriptors.MolWt(mol)
+            except Exception: mw = None
+        if mw is not None and float(mw) > self._mw_cutoff and not ctx.get("contains_sugar"):
+            return self._set(("odorless",))
+        return self._set(())          # -> unknown bit
+
+
+class TwoPartCondVec(CondVecEncoder):
+    """``[flavor bits | pocket embedding]`` -- the two halves have opposite roles.
+
+    flavor  sparse, categorical, from measurement/literature/physics. Present
+            during pretraining wherever known.
+    pocket  dense, continuous, from a pocket graph encoder. ZERO throughout
+            pretraining on flavordb+coconut (no protein pairings exist), filled
+            only during pocket finetuning on tastepocket.
+
+    The pocket half is leak-free by construction: a receptor structure is not a
+    function of the ligand. That is the property every flavor-derived signal
+    failed, and it is why the pocket stage rests on firmer ground than the
+    flavor stage despite having only 59 taste-strict complexes.
+    """
+
+    mode = "two_part"
+
+    def __init__(self, flavor: "FlavorCondVec", pocket: "PocketCondVec") -> None:
+        self.flavor = flavor
+        self.pocket = pocket
+
+    @property
+    def dim(self) -> int:
+        return self.flavor.dim + self.pocket.dim
+
+    @property
+    def is_pocket_fed(self) -> bool:
+        return self.pocket.is_fed
+
+    def encode(self, mol: Chem.Mol, context: Optional[object] = None) -> np.ndarray:
+        return np.concatenate([self.flavor.encode(mol, context),
+                               self.pocket.encode(mol, context)]).astype(np.float32)
+
+
+def load_flavor_tables(measured_path=None, mined_path=None):
+    """``(measured, mined)`` label tables keyed by InChIKey and by mol_id."""
+    import json
+    meas: Dict[str, Sequence[str]] = {}
+    mined: Dict[str, Sequence[str]] = {}
+    for path, table, doc_only in ((measured_path, meas, False), (mined_path, mined, True)):
+        if not path:
+            continue
+        for line in open(path):
+            line = line.strip()
+            if not line:
+                continue
+            try: r = json.loads(line)
+            except Exception: continue
+            # mined labels are usable ONLY at the documented tier
+            if doc_only and r.get("evidence") != "documented":
+                continue
+            labs = [l for l in (r.get("labels") or []) if l != "unknown"]
+            if not labs:
+                continue
+            for k in ((r.get("inchikey") or "").strip(), (r.get("id") or "").strip()):
+                if k:
+                    table[k] = labs
+    return meas, mined
+
+
+CONDVEC_MODES = ("neutral", "pocket", "flavor", "two_part")
 
 
 def get_condvec_encoder(mode: str = "neutral", **kwargs) -> CondVecEncoder:
@@ -205,4 +371,9 @@ def get_condvec_encoder(mode: str = "neutral", **kwargs) -> CondVecEncoder:
         neutral_dim = NeutralCondVec().dim
         kwargs.setdefault("dim", neutral_dim)
         return PocketCondVec(**kwargs)
+    if mode == "flavor":
+        return FlavorCondVec(**kwargs)
+    if mode == "two_part":
+        pocket_dim = kwargs.pop("pocket_dim", 0)
+        return TwoPartCondVec(FlavorCondVec(**kwargs), PocketCondVec(dim=pocket_dim))
     raise ValueError(f"unknown condvec mode {mode!r}; available: {list(CONDVEC_MODES)}")

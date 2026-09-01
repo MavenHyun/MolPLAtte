@@ -56,6 +56,7 @@ molecules already written) or ``--overwrite`` (start clean) is given.
 from __future__ import annotations
 
 import argparse
+import logging
 import json
 import multiprocessing as mp
 import os
@@ -119,8 +120,22 @@ def _init_worker(config: dict) -> None:
         config,
         family=family,
         decomposer=decomposer,
-        condvec=get_condvec_encoder(config["condvec_mode"]),
+        condvec=_build_condvec(config),
     )
+
+
+def _build_condvec(config):
+    """Condvec encoder for a worker, loading flavor tables when needed."""
+    mode = config["condvec_mode"]
+    if mode not in ("flavor", "two_part"):
+        return get_condvec_encoder(mode)
+    from molpallete_prep.condvec import FlavorCondVec, load_flavor_tables, PocketCondVec, TwoPartCondVec
+    meas, mined = load_flavor_tables(config.get("flavor_measured"),
+                                     config.get("flavor_mined"))
+    fl = FlavorCondVec(measured=meas, mined=mined)
+    if mode == "flavor":
+        return fl
+    return TwoPartCondVec(fl, PocketCondVec(dim=int(config.get("pocket_dim", 0))))
 
 
 def _rgroup_condvec(mol: Chem.Mol, rgroup_atoms: Iterable[int]) -> np.ndarray:
@@ -131,6 +146,14 @@ def _rgroup_condvec(mol: Chem.Mol, rgroup_atoms: Iterable[int]) -> np.ndarray:
     atom is not a real atom.
     """
     encoder = _W["condvec"]
+    # MOLECULE-LEVEL modes bypass the per-R-group path entirely. MolPLA's c_R is
+    # the functional-group vector OF THE TARGET R-GROUP -- it describes the
+    # answer, which is why the 97-bit version leaked (rank1_distinct 680,
+    # coverage 11.4%). A flavor condition means "the flavour the assembled
+    # molecule should have": a property of the PARENT, supplied by the user at
+    # inference. Same vector on every R-group row of a molecule.
+    if getattr(encoder, "mode", None) in ("flavor", "two_part"):
+        return encoder.encode(mol, _W.get("mol_context") or {})
     atoms = list(rgroup_atoms)
     try:
         smiles = Chem.MolFragmentToSmiles(mol, atomsToUse=atoms, canonical=True)
@@ -192,6 +215,12 @@ def _process_one(item: Tuple[str, str, str, dict]) -> Tuple[str, str, Optional[d
             # clone of its core-side neighbour -- NOT on which other R-groups are
             # detached.  So its hash and condition vector are islinked-invariant
             # and can be precomputed here rather than per __getitem__.
+            _W["mol_context"] = {
+                "mol_id": record.get("mol_id", ""),
+                "inchikey": (record.get("meta") or {}).get("standard_inchi_key", ""),
+                "mw": (record.get("meta") or {}).get("molecular_weight"),
+                "contains_sugar": (record.get("meta") or {}).get("contains_sugar") == "True",
+            }
             hashes, condvecs = [], []
             for rgroup in dec.rgroups:
                 try:
@@ -266,6 +295,14 @@ def _source_items(args, size_filter: SizeFilter, skip: set) -> Iterator[tuple]:
     rng = random.Random(args.sample_seed)
     emitted = 0
     paths = {"flavordb": args.flavordb_path, "coconut": args.coconut_path}
+    # Optional id whitelist. FlavorDB records are exempt: they are labelled by
+    # construction, so the filter exists to thin the COCONUT half.
+    include = None
+    if getattr(args, "include_ids", None):
+        with open(args.include_ids) as fh:
+            include = {ln.strip() for ln in fh if ln.strip()}
+        logging.info("[info] include_ids      : %s ids from %s",
+                     f"{len(include):,}", args.include_ids)
     for source in args.source:
         for record in read_source(
             source, paths.get(source), size_filter=size_filter
@@ -273,6 +310,9 @@ def _source_items(args, size_filter: SizeFilter, skip: set) -> Iterator[tuple]:
             if args.sample_fraction is not None and rng.random() >= args.sample_fraction:
                 continue
             if record.mol_id in skip:
+                continue
+            if include is not None and source != "flavordb" \
+                    and record.mol_id not in include:
                 continue
             yield (record.mol_id, record.smiles, record.source, record.meta)
             emitted += 1
@@ -335,6 +375,10 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         help="a core must hold at least this fraction of the molecule's atoms",
     )
     decomp.add_argument("--max-cores", type=int, default=10)
+    source.add_argument("--include-ids", default=None,
+                        help="restrict to molecule ids listed in this file "
+                             "(one per line). FlavorDB records are always kept: "
+                             "the filter targets the COCONUT half.")
     decomp.add_argument("--min-rgroup-atoms", type=int, default=1,
                         help="Reject a core if ANY of its R-groups has fewer "
                              "heavy atoms than this. 2 removes single-atom "
@@ -361,6 +405,13 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         "formal_charge to one class.",
     )
     decomp.add_argument("--condvec-mode", choices=CONDVEC_MODES, default="neutral")
+    decomp.add_argument("--flavor-measured", default=None,
+                        help="jsonl of MEASURED flavor labels (FlavorDB etc.)")
+    decomp.add_argument("--flavor-mined", default=None,
+                        help="jsonl of LLM annotations; only evidence=documented is used")
+    decomp.add_argument("--pocket-dim", type=int, default=0,
+                        help="width of the pocket half in --condvec-mode two_part "
+                             "(zeros during pretraining)")
 
     out = parser.add_argument_group("output")
     out.add_argument("--output-path", required=True)
@@ -400,7 +451,11 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     size_filter = SizeFilter(args.min_heavy_atoms, args.max_heavy_atoms)
     method_kwargs = _build_method_kwargs(args)
-    condvec_dim = get_condvec_encoder(args.condvec_mode).dim
+    _cv_cfg = {"condvec_mode": args.condvec_mode,
+               "flavor_measured": args.flavor_measured,
+               "flavor_mined": args.flavor_mined,
+               "pocket_dim": args.pocket_dim}
+    condvec_dim = _build_condvec(_cv_cfg).dim
 
     skip: set = set()
     prior_index: List[dict] = []
@@ -428,6 +483,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         "keep_stereo": args.keep_stereo,
         "neutralise": args.neutralise,
         "condvec_mode": args.condvec_mode,
+        "flavor_measured": args.flavor_measured,
+        "flavor_mined": args.flavor_mined,
+        "pocket_dim": args.pocket_dim,
         "output_path": str(out_path),
         "layout": args.layout,
     }
@@ -543,6 +601,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         "neutralise": args.neutralise,
         "size_filter": size_filter.as_dict(),
         "condvec_mode": args.condvec_mode,
+        "flavor_measured": args.flavor_measured,
+        "flavor_mined": args.flavor_mined,
+        "pocket_dim": args.pocket_dim,
         "condvec_dim": condvec_dim,
         "sample_fraction": args.sample_fraction,
         "sample_seed": args.sample_seed,
