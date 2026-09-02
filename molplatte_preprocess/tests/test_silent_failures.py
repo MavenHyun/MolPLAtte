@@ -1,0 +1,233 @@
+"""Regression guards for failures that produced no error.
+
+Every case here corresponds to a bug that ran to completion and wrote
+plausible-looking output. None of them would have been caught by "does it
+crash?", which is why they survived long enough to reach a corpus:
+
+- the flavor condvec collapsed to a single MW>350 bit across all four corpora
+  and nothing failed; the vector was simply uninformative (24b75d1)
+- CrossDocked's official test set would have leaked into train through
+  ligand-level deduplication, and training would have looked fine (83e7601)
+- a drug-like heavy-atom floor silently rejected the cognate ligand of the only
+  human olfactory receptor structure in the PDB (233c52c)
+
+Run: pytest molplatte_preprocess/tests -q
+"""
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+import pytest
+
+SRC = Path(__file__).resolve().parents[1] / "src"
+if str(SRC) not in sys.path:
+    sys.path.insert(0, str(SRC))
+REPO = Path(__file__).resolve().parents[1]
+if str(REPO) not in sys.path:
+    sys.path.insert(0, str(REPO))
+
+from rdkit import Chem  # noqa: E402
+
+from molplatte_prep.condvec import (  # noqa: E402
+    CONDVEC_VERSION,
+    FLAVOR_LABELS,
+    FlavorCondVec,
+)
+from molplatte_prep.pocket_ligands import (  # noqa: E402
+    MIN_HEAVY_ATOMS,
+    assess_ligand,
+    ccd_code_from_path,
+    is_artifact,
+)
+from molplatte_prep.readers import _xd_split  # noqa: E402
+
+
+def bits(vec):
+    return {FLAVOR_LABELS[i] for i, x in enumerate(vec) if x > 0.5}
+
+
+# ---------------------------------------------------------------- condvec
+class TestFlavorCondvecReadsItsTables:
+    """The condvec must consult the label tables, not fall through to physics.
+
+    The original bug read mol_context off a record whose `meta` key did not
+    exist yet, so the InChIKey was always "" and every molecule took the
+    MW>350 branch. Asserting "a vector was produced" would have passed.
+    """
+
+    @pytest.fixture
+    def encoder(self):
+        return FlavorCondVec(
+            measured={"KEY-MEASURED": ["bitter"], "FDB1": ["sweet"]},
+            mined={"KEY-MINED": ["fruity"]},
+        )
+
+    def test_resolves_measured_label_by_inchikey(self, encoder):
+        v = encoder.encode(None, {"inchikey": "KEY-MEASURED", "mol_id": "", "mw": None})
+        assert bits(v) == {"bitter"}
+
+    def test_resolves_measured_label_by_mol_id(self, encoder):
+        v = encoder.encode(None, {"inchikey": "", "mol_id": "FDB1", "mw": None})
+        assert bits(v) == {"sweet"}
+
+    def test_measurement_outranks_the_mw_physics_rule(self, encoder):
+        """A heavy compound with a measured label is NOT odorless.
+
+        This is the exact shape of the observed failure: FDB18250360, a sweet
+        glycoside at MW 508, was stored as `odorless`.
+        """
+        v = encoder.encode(None, {"inchikey": "KEY-MEASURED", "mol_id": "", "mw": 508.0})
+        assert bits(v) == {"bitter"}
+        assert "odorless" not in bits(v)
+
+    def test_mined_labels_are_used_when_unmeasured(self, encoder):
+        v = encoder.encode(None, {"inchikey": "KEY-MINED", "mol_id": "", "mw": None})
+        assert bits(v) == {"fruity"}
+
+    def test_unknown_light_molecule_is_unknown_not_odorless(self, encoder):
+        v = encoder.encode(None, {"inchikey": "NOPE", "mol_id": "", "mw": 120.0})
+        assert bits(v) == {"unknown"}
+
+    def test_unknown_heavy_molecule_is_odorless(self, encoder):
+        """`odorless` is a positive volatility claim, distinct from `unknown`."""
+        v = encoder.encode(None, {"inchikey": "NOPE", "mol_id": "", "mw": 800.0})
+        assert bits(v) == {"odorless"}
+
+    def test_vector_is_never_all_zero(self, encoder):
+        for ctx in ({"inchikey": "KEY-MEASURED"}, {"inchikey": "X", "mw": 90.0},
+                    {"inchikey": "X", "mw": 900.0}, {}):
+            assert bits(encoder.encode(None, ctx)), f"all-zero vector for {ctx}"
+
+    def test_condvec_version_is_past_the_broken_build(self):
+        """v1 corpora carry the MW-only vector and must stay distinguishable."""
+        assert CONDVEC_VERSION >= 2
+
+
+class TestMolContextKeySpellings:
+    """COCONUT uses snake_case, FlavorDB uses PubChem CamelCase.
+
+    Reading only one spelling yields "" for every molecule from the other
+    source -- which is half the corpus, silently unlabelled.
+    """
+
+    @pytest.fixture
+    def mol_context(self):
+        from preprocess_flavor import _mol_context
+
+        return _mol_context
+
+    def test_reads_coconut_spelling(self, mol_context):
+        ctx = mol_context("CNP1", {"standard_inchi_key": "AAA", "molecular_weight": "200"})
+        assert ctx["inchikey"] == "AAA"
+        assert ctx["mw"] == "200"
+
+    def test_reads_flavordb_spelling(self, mol_context):
+        ctx = mol_context("FDB1", {"InChIKey": "BBB", "MolecularWeight": "300"})
+        assert ctx["inchikey"] == "BBB"
+        assert ctx["mw"] == "300"
+
+    def test_missing_meta_does_not_raise(self, mol_context):
+        assert mol_context("X", None)["inchikey"] == ""
+
+
+# ---------------------------------------------------------------- split leak
+class TestCrossDockedSplitPrecedence:
+    """86 ligands bind both train and test pockets.
+
+    One record per ligand means the ligand needs ONE split. Taking the first
+    key's split -- the obvious implementation -- puts those in train and leaks
+    the official test set. Training would have looked entirely normal.
+    """
+
+    SPLIT = {1: "train", 2: "test", 3: "train", 4: "val"}
+
+    def test_test_wins_over_train(self):
+        assert _xd_split(["1", "2", "3"], self.SPLIT) == "test"
+
+    def test_test_wins_regardless_of_key_order(self):
+        assert _xd_split(["3", "1", "2"], self.SPLIT) == "test"
+
+    def test_val_wins_over_train(self):
+        assert _xd_split(["1", "4"], self.SPLIT) == "val"
+
+    def test_train_when_only_train(self):
+        assert _xd_split(["1", "3"], self.SPLIT) == "train"
+
+    def test_unassigned_when_absent_from_split(self):
+        assert _xd_split(["99"], self.SPLIT) == "unassigned"
+
+    def test_non_numeric_keys_do_not_raise(self):
+        assert _xd_split(["abc"], self.SPLIT) == "unassigned"
+
+
+class TestCcdCodeParsing:
+    def test_parses_crossdocked_filename(self):
+        p = "3HAO_CUPMC_1_172_0/4hvr_A_rec_1yfy_3ha_lig_tt_min_0.sdf"
+        assert ccd_code_from_path(p) == "3HA"
+
+    def test_returns_none_when_absent(self):
+        assert ccd_code_from_path("nonsense.sdf") is None
+
+
+# ---------------------------------------------------------------- ligands
+class TestLigandValidation:
+    ESTRONE = "C[C@]12CCc3c(ccc4cc(O)ccc34)[C@@H]1CCC2=O"
+    PROPIONATE = "CCC(=O)O"
+
+    def test_blocklist_categories(self):
+        assert is_artifact("ADP") == "cofactor"
+        assert is_artifact("MRD") == "cryo"
+        assert is_artifact("PPV") == "buffer"
+        assert is_artifact("HOH") == "water"
+        assert is_artifact("ZN") == "ion"
+        assert is_artifact("NAG") == "glycan"
+        assert is_artifact("3HA") is None
+
+    def test_cofactors_can_be_readmitted(self):
+        assert is_artifact("ADP", keep_cofactors=True) is None
+        # re-admitting cofactors must not loosen any other category
+        assert is_artifact("MRD", keep_cofactors=True) == "cryo"
+
+    def test_real_ligand_survives(self):
+        v = assess_ligand(Chem.MolFromSmiles(self.ESTRONE), "EST")
+        assert v.ok, v.reason
+
+    def test_artifact_rejected_by_identity_not_property(self):
+        v = assess_ligand(Chem.MolFromSmiles("C[C@@H](O)CC(C)(C)O"), "MRD")
+        assert not v.ok and v.reason == "artifact:cryo"
+
+    def test_small_odorant_is_kept(self):
+        """Propionate is the cognate ligand of OR51E2 (8F76).
+
+        A conventional drug-like floor rejects it. Odorants must be volatile to
+        reach a receptor, so a drug-calibrated minimum removes the target domain.
+        """
+        mol = Chem.MolFromSmiles(self.PROPIONATE)
+        assert mol.GetNumHeavyAtoms() == 5
+        assert MIN_HEAVY_ATOMS <= 5
+        assert assess_ligand(mol, "PPI").ok
+
+    def test_unlisted_polyphosphate_caught_by_property_screen(self):
+        v = assess_ligand(Chem.MolFromSmiles("O=P(O)(O)OP(=O)(O)OP(=O)(O)OCC"), "ZZZ")
+        assert not v.ok and v.reason == "polyphosphate"
+
+    def test_multi_fragment_rejected(self):
+        v = assess_ligand(Chem.MolFromSmiles("CCCCCCO.[Na+]"), "ZZZ")
+        assert not v.ok
+
+    def test_unparsable_is_rejected_not_raised(self):
+        assert not assess_ligand(None, "ZZZ").ok
+
+
+# ---------------------------------------------------------------- hashing
+class TestHashVersionPinned:
+    def test_hash_version_matches_built_corpora(self):
+        """Corpora on disk store rgroup_hashes at this version.
+
+        A bump without a rebuild makes every retrieval target miss, and the
+        symptom is a quiet drop in Hit@K rather than an error.
+        """
+        from molplatte_prep.graph_hash import HASH_VERSION
+
+        assert HASH_VERSION == 4
