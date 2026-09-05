@@ -307,6 +307,57 @@ class TestChemosensoryRescue:
         assert assess_ligand(mol, "SPM", allow_chemosensory=True).ok
 
 
+class TestFreeAminoAcidLigandsAreNotPolymerResidues:
+    """A ligand named TRP is not the 14 tryptophans in the protein backbone.
+
+    mmCIF records free amino acids as ATOM rather than HETATM, so `hetero`
+    cannot find them, and selecting on `resname` alone matches every backbone
+    copy too. In 7DTU that turned 2 real ligands into 30, and 445 across the
+    tastepocket set -- every extra one a pocket built around a backbone residue.
+    It produces pockets of the right size, full of real atoms, and errors on
+    nothing. CaSR and T1R are amino-acid sensors, so this is not a rare corner.
+    """
+
+    CIF = Path.home() / "datasets/tastepocket/structures/cif/7DTU.cif"
+
+    @pytest.fixture
+    def structure(self):
+        if not self.CIF.exists():
+            pytest.skip(f"fixture structure not present: {self.CIF}")
+        import prody
+
+        from molplatte_prep.pocket_ligands import _parse_structure
+
+        prody.confProDy(verbosity="none")
+        return _parse_structure(self.CIF)
+
+    def test_polymer_chains_are_identified(self, structure):
+        from molplatte_prep.pocket_ligands import polymer_chain_ids
+
+        assert set(map(str, polymer_chain_ids(structure))) == {"A", "B"}
+
+    def test_only_the_free_tryptophans_are_ligands(self, structure):
+        from molplatte_prep.pocket_ligands import ligand_instances
+
+        inst = ligand_instances(structure, "TRP")
+        assert len(inst) == 2, f"expected 2 free TRP ligands, got {len(inst)}"
+        assert {str(r.getChid()) for r in inst} == {"G", "K"}
+        # the free amino acid carries OXT; a backbone residue does not
+        assert all(r.numAtoms() == 15 for r in inst)
+
+    def test_naive_resname_selection_would_have_been_wrong(self, structure):
+        """Pins the bug itself, so the guard cannot pass by coincidence."""
+        naive = structure.select("resname TRP")
+        n_naive = len(list(naive.getHierView().iterResidues()))
+        assert n_naive == 30, f"fixture changed: naive select gives {n_naive}"
+
+    def test_ordinary_hetatm_ligands_still_found(self, structure):
+        """The polymer rule must not break normal HETATM ligand selection."""
+        from molplatte_prep.pocket_ligands import ligand_instances
+
+        assert len(ligand_instances(structure, "NAG")) == 14
+
+
 # ---------------------------------------------------------------- hashing
 class TestHashVersionPinned:
     def test_hash_version_matches_built_corpora(self):

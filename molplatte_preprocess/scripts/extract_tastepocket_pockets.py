@@ -43,6 +43,17 @@ AA3to1 = {
 #: be permissive -- the point is to drop degenerate cases, not to curate.
 MIN_POCKET_RESIDUES = 8
 
+#: A chain with at least this many amino acids is the protein, not a ligand.
+#: Used to tell a free amino-acid LIGAND from the polymer residues that share
+#: its name. mmCIF records free amino acids as ATOM rather than HETATM -- in
+#: 7DTU the tryptophan agonist is chain G, one residue, 15 atoms (it has OXT),
+#: while chains A/B are 778-residue polymers holding 14 backbone tryptophans
+#: each. So `hetero` cannot find it and a bare `resname TRP` match sweeps up
+#: the whole protein: 30 "ligands" from one structure, 445 across the set.
+#: Every pocket built around a backbone residue is meaningless, and nothing
+#: about it errors -- the pockets are the right shape and full of real atoms.
+MIN_POLYMER_CHAIN = 20
+
 
 def chain_sequence(structure, chid):
     """(one-letter sequence, {resnum: index}) for one chain's CA trace.
@@ -108,17 +119,41 @@ def main() -> int:
                 stats["cif_unparsable"] += 1
                 continue
 
+            # Chains long enough to be the protein itself. A residue outside
+            # them is a ligand even when it is recorded as ATOM.
+            polymer_chains = set()
+            for chain in st.getHierView().iterChains():
+                n_aa = sum(1 for r in chain.iterResidues()
+                           if r.getResname().strip().upper() in AA3to1)
+                if n_aa >= MIN_POLYMER_CHAIN:
+                    polymer_chains.add(chain.getChid())
+
             seq_cache = {}
             for code in codes:
-                het = st.select(f"resname {code}")
-                if het is None:
+                named = st.select(f"resname {code}")
+                if named is None:
                     stats["ligand_absent_from_coords"] += 1
+                    continue
+                # Keep only copies that are NOT part of the polymer: either
+                # flagged hetero, or sitting in a chain too short to be protein.
+                instances = [
+                    r for r in named.getHierView().iterResidues()
+                    if r.getChid() not in polymer_chains
+                ]
+                het = st.select(f"hetero and resname {code}")
+                if het is not None:
+                    seen = {(r.getChid(), int(r.getResnum())) for r in instances}
+                    for r in het.getHierView().iterResidues():
+                        if (r.getChid(), int(r.getResnum())) not in seen:
+                            instances.append(r)
+                if not instances:
+                    stats["only_polymer_copies"] += 1
                     continue
 
                 # One entry can hold several copies of the same ligand (e.g. a
                 # homotetramer). Each copy sits in its own pocket, so each is a
                 # separate training example rather than one averaged site.
-                for res in het.getHierView().iterResidues():
+                for res in instances:
                     inst = f"{res.getChid()}_{int(res.getResnum())}"
                     sel = st.select(
                         "chain {} and resname {} and resnum {}".format(

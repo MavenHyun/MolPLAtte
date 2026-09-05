@@ -1,4 +1,5 @@
 from .custom_convs import EdgeGatedGraphConv
+from .pocket_conditioning import PocketConditioning
 from .utils import (
     BATCH_AWARE_NORM_NAMES,
     EDGE_BLIND_CONVS,
@@ -17,6 +18,7 @@ __all__ = [
     "FEAT2DIM_NODE",
     "MOL_DEGREE_HISTOGRAM",
     "EdgeGatedGraphConv",
+    "PocketConditioning",
     "GraphSequential",
     "_make_conv",
     "_make_norm",

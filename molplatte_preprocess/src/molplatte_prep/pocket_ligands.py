@@ -288,6 +288,63 @@ def _parse_structure(path: Path):
     return prody.parsePDB(str(path))
 
 
+#: A chain with at least this many amino acids is the protein, not a ligand.
+#: Needed to tell a free amino-acid LIGAND from the polymer residues sharing its
+#: name: mmCIF records free amino acids as ATOM, not HETATM. In 7DTU the
+#: tryptophan agonist of the calcium-sensing receptor is chain G, one residue,
+#: 15 atoms (it carries OXT), while chains A/B are 778-residue polymers holding
+#: 14 backbone tryptophans each. `hetero` therefore cannot find it, and a bare
+#: `resname TRP` match sweeps up the whole protein.
+MIN_POLYMER_CHAIN = 20
+
+#: Residues that are amino acids for the purpose of deciding "is this a polymer".
+_STANDARD_AA = {
+    "ALA", "ARG", "ASN", "ASP", "CYS", "GLN", "GLU", "GLY", "HIS", "ILE",
+    "LEU", "LYS", "MET", "PHE", "PRO", "SER", "THR", "TRP", "TYR", "VAL",
+    "MSE", "SEC", "PYL",
+}
+
+
+def polymer_chain_ids(structure, min_length: int = MIN_POLYMER_CHAIN) -> Set[str]:
+    """Chain ids long enough to be the protein itself."""
+    out: Set[str] = set()
+    for chain in structure.getHierView().iterChains():
+        n_aa = sum(
+            1 for r in chain.iterResidues()
+            if r.getResname().strip().upper() in _STANDARD_AA
+        )
+        if n_aa >= min_length:
+            out.add(chain.getChid())
+    return out
+
+
+def ligand_instances(structure, code: str, min_length: int = MIN_POLYMER_CHAIN):
+    """Every copy of *code* in *structure* that is a ligand, not polymer.
+
+    A copy qualifies if it sits outside a polymer chain OR is flagged hetero.
+    The first arm catches free amino-acid agonists (CaSR and T1R are amino-acid
+    sensors, so these are a large part of any chemosensory set); the second
+    catches ordinary HETATM ligands that share the protein's chain id.
+
+    Selecting on ``resname`` alone instead is silently wrong and produces
+    plausible output: pockets of the right size, full of real atoms, built
+    around backbone residues.
+    """
+    named = structure.select(f"resname {code}")
+    if named is None:
+        return []
+    polymer = polymer_chain_ids(structure, min_length)
+    out = [r for r in named.getHierView().iterResidues()
+           if r.getChid() not in polymer]
+    seen = {(r.getChid(), int(r.getResnum())) for r in out}
+    het = structure.select(f"hetero and resname {code}")
+    if het is not None:
+        for r in het.getHierView().iterResidues():
+            if (r.getChid(), int(r.getResnum())) not in seen:
+                out.append(r)
+    return out
+
+
 def extract_ligands(
     path: str | Path,
     *,
