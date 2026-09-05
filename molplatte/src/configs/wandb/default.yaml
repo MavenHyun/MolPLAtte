@@ -1,0 +1,31 @@
+# @package _global_
+
+# wandb is OFF unless `project` is set: get_logger returns None when it is null,
+# and the run proceeds without logging. Enable with `wandb.project=<name>`.
+#
+# Note `~wandb.project` does NOT work -- Hydra treats a null value as a missing
+# key and refuses the delete.
+#
+# Credentials come from WANDB_API_KEY via the `api` config group; without it
+# wandb falls back to offline mode or fails to init, depending on its own
+# settings. `WANDB_MODE=offline` is the way to exercise this path without a key.
+
+wandb:
+  project:   null
+  name:      null
+  experiment: null
+  save_dir:  null
+  dir:       null
+  # MolDAM defaults this to `all`, which uploads a checkpoint on every
+  # improvement. MolPLAtte checkpoints are ~21 MB and val/loss improves often
+  # early on, so `all` can push a gigabyte of artifacts per run. `false` keeps
+  # metrics only; set to `all` or `best` deliberately.
+  log_model: false
+  # Hyperparameter-sweep organisation. `group` collapses a sweep into one
+  # expandable row in the wandb UI; `job_type` separates screening from final
+  # runs; `tags` carry the varied axis so runs can be filtered without parsing
+  # run names. All null for a normal one-off run.
+  group:      null
+  job_type:   null
+  tags:       null
+  notes:      null

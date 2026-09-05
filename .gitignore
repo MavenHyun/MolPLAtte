@@ -11,8 +11,14 @@ checkpoints/
 *.pt
 *.mdb
 *.log
-wandb/
+# wandb RUN OUTPUT only. An unanchored `wandb/` also matches
+# molplatte/src/configs/wandb/, which silently untracked the wandb config group
+# and made a fresh clone fail Hydra composition before any run could start.
+/wandb/
+molplatte/src/wandb/
+molplatte_preprocess/wandb/
 .env
 
 .ipynb_checkpoints/
 .DS_Store
+.pytest_cache/
