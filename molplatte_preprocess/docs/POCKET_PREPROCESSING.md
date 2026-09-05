@@ -442,8 +442,14 @@ novel tail from the metric.
 - CrossDocked has no pocket embeddings yet, so the pocket encoder currently
   trains on 269 tastepocket records. That is far too few to learn a pocket
   representation from scratch; CrossDocked's 11,268 ligands over 147,648 pairs
-  are the only substrate with enough receptor variety, and wiring them in means
-  recovering chain sequences from the `pocket10` LMDB.
+  are the only substrate with enough receptor variety.
+
+  The path is available: full receptors sit at
+  `crossdocked_v1.1_rmsd1.0/<target>/*_rec.pdb` across 2,474 target directories.
+  Use those, NOT the prepared `*_pocket10.pdb` files -- the corpus recipe embeds
+  the whole chain and then selects pocket residues from it, so embedding a
+  pre-cut pocket would strip the protein context ESM depends on and put the two
+  corpora in different spaces while every shape still matched.
 - Geometry is not used. The PLM path was chosen first because it needs no change
   to the data pipeline; whether 3D structure buys anything over sequence is an
   open question that an EGNN ablation would answer.
