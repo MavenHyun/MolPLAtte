@@ -48,6 +48,8 @@ the same relation: ``B1 >= B2`` and ``B1 >= B3``.
 
 from __future__ import annotations
 
+import logging
+
 from dataclasses import dataclass, field, fields
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -57,7 +59,7 @@ import torch
 # `lightning` and `pytorch_lightning` makes Lightning's is_overridden()
 # fail to find the parent class ("ValueError: Expected a parent").
 import pytorch_lightning as pl
-from torch.utils.data import DataLoader, random_split
+from torch.utils.data import DataLoader, Subset, random_split
 from torch_geometric.data import Batch
 
 from .assembly_targets import (
@@ -225,6 +227,18 @@ class DataModuleConfig:
     num_workers: int = 8
     val_split: float = 0.05
     test_split: float = 0.05
+    #: Cross-validation fold to hold out, or -1 for the ordinary random split.
+    #:
+    #: A random split is WRONG for the pocket corpus and right for the flavor
+    #: corpora, which is why this is opt-in rather than the default. Pooled
+    #: ESM-2 pocket embeddings identify the receptor family with 98.5% 1-NN
+    #: accuracy across PDB entries, so a random split puts the same protein --
+    #: often the same ligand -- on both sides, and the model scores by
+    #: memorisation. The folds cut whole connected components of the
+    #: (ligand, receptor) graph so both are disjoint by construction.
+    cv_fold: int = -1
+    #: ``mol_id -> fold`` map. Defaults to ``folds.json`` beside the corpus.
+    cv_folds_path: Optional[str] = None
     seed: int = 42
     persistent_workers: bool = True
     pin_memory: bool = True
@@ -284,6 +298,9 @@ class MolPLAtteDataModule(pl.LightningDataModule):
             max_common_fraction=self.config.max_common_fraction,
         )
         n_total = len(dataset)
+        if self.config.cv_fold >= 0:
+            self._splits = self._fold_splits(dataset)
+            return
         n_val = int(n_total * self.config.val_split)
         n_test = int(n_total * self.config.test_split)
         n_train = n_total - n_val - n_test
@@ -292,6 +309,62 @@ class MolPLAtteDataModule(pl.LightningDataModule):
             [n_train, n_val, n_test],
             generator=torch.Generator().manual_seed(self.config.seed),
         )
+
+    def _fold_splits(self, dataset) -> tuple:
+        """Hold out one precomputed fold; everything else trains.
+
+        The fold is a property of the MOLECULE, so it is resolved through the
+        item -> molecule mapping rather than applied to item indices directly.
+        A corpus sampled per decomposition has several items per molecule, and
+        splitting those independently would put two decompositions of the same
+        ligand on opposite sides -- the leak the folds exist to prevent.
+        """
+        import json
+
+        path = self.config.cv_folds_path
+        if path is None:
+            # dataset_path is already <root>/<version>/<method> by here:
+            # __post_init__ resolves it in place.
+            path = Path(self.config.dataset_path) / "folds.json"
+        path = Path(path)
+        if not path.is_file():
+            raise FileNotFoundError(
+                f"cv_fold={self.config.cv_fold} needs a fold map, none at {path}. "
+                "Write one with build_tastepocket_dataset.py, or set cv_fold=-1 "
+                "for a random split."
+            )
+        fold_of_id = json.loads(path.read_text())
+
+        n_items = len(dataset)
+        mol_of_item = getattr(dataset, "_mol_of_item", None)
+        ids = dataset.ids
+
+        held, rest, unmapped = [], [], 0
+        for i in range(n_items):
+            mol_index = int(mol_of_item[i]) if mol_of_item is not None else i
+            fold = fold_of_id.get(ids[mol_index])
+            if fold is None:
+                unmapped += 1
+                rest.append(i)          # never silently held out
+            elif int(fold) == self.config.cv_fold:
+                held.append(i)
+            else:
+                rest.append(i)
+
+        if not held:
+            raise ValueError(
+                f"cv_fold={self.config.cv_fold} selected 0 of {n_items} items; "
+                f"folds present: {sorted(set(fold_of_id.values()))}"
+            )
+        logging.getLogger(__name__).info(
+            "[DataModule] cv_fold=%d -> train %d / held-out %d items%s",
+            self.config.cv_fold, len(rest), len(held),
+            f" ({unmapped} unmapped, kept in train)" if unmapped else "",
+        )
+        # val and test are the same held-out fold: with ~50 records there is
+        # nothing to gain from splitting it again, and model selection happens
+        # across folds rather than within one.
+        return (Subset(dataset, rest), Subset(dataset, held), Subset(dataset, held))
 
     def _split(self, index: int):
         if self._splits is None:

@@ -142,6 +142,8 @@ def main() -> int:
     ap.add_argument("--ligands", type=Path, required=True)
     ap.add_argument("--out", type=Path, required=True)
     ap.add_argument("--folds", type=int, default=N_FOLDS)
+    ap.add_argument("--folds-out", type=Path, default=None,
+                    help="mol_id -> fold sidecar for the data module")
     ap.add_argument("--seed", type=int, default=20260905)
     args = ap.parse_args()
 
@@ -220,6 +222,14 @@ def main() -> int:
     with args.out.open("w") as fh:
         for r in records:
             fh.write(json.dumps(r) + "\n")
+
+    # Sidecar the data module reads to hold out a fold. Keyed on the corpus
+    # mol_id so it survives the corpus being rebuilt.
+    if args.folds_out:
+        args.folds_out.parent.mkdir(parents=True, exist_ok=True)
+        args.folds_out.write_text(json.dumps(
+            {r["id"]: r["fold"] for r in records}, indent=0))
+        print(f"wrote {args.folds_out}")
 
     # -- report ------------------------------------------------------------
     print(f"pocket sites            {len(pockets)}")
