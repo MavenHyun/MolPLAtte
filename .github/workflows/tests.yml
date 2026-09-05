@@ -1,0 +1,79 @@
+name: tests
+
+# The suite is a tripwire for SILENT failures -- bugs that ran to completion and
+# wrote plausible output. A tripwire nobody checks is decoration, so it runs on
+# every push and PR rather than when someone remembers.
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  clonable:
+    # Runs first and alone, because it is the only check a fresh machine can
+    # make that this machine cannot: that the repo actually works from a clone.
+    # A .gitignore pattern once untracked a whole Hydra config group, and every
+    # local run kept passing on the untracked file sitting in the working tree.
+    name: repo is clonable
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install pytest
+      - name: every config group survives a clone
+        run: python -m pytest molplatte_preprocess/tests/test_repo_is_clonable.py -v
+
+  unit:
+    name: silent-failure guards
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: install
+        run: |
+          python -m pip install --upgrade pip
+          # CPU wheels: the guards are pure logic and never touch a GPU, and the
+          # CUDA build is several GB of download for no benefit here.
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install torch_geometric
+          pip install rdkit numpy prody networkx pytest
+
+      - name: pytest
+        run: python -m pytest molplatte_preprocess/tests -v --tb=short
+        env:
+          PYTHONPATH: ${{ github.workspace }}/molplatte_preprocess/src
+
+      - name: mutation check
+        # A guard that passes with its bug reintroduced is decoration. This
+        # reintroduces one and asserts the suite goes red -- so a future edit
+        # that neuters the guards fails here rather than passing quietly.
+        run: |
+          set -e
+          f=molplatte_preprocess/src/molplatte_prep/condvec.py
+          cp "$f" /tmp/condvec.bak
+          python - <<'PY'
+          from pathlib import Path
+          p = Path("molplatte_preprocess/src/molplatte_prep/condvec.py")
+          s = p.read_text()
+          old = "        if seen & ODOUR_LABELS:\n            v[_ODORLESS_I] = 0.0\n"
+          assert old in s, "mutation target not found -- update this step"
+          p.write_text(s.replace(old, ""))
+          PY
+          if python -m pytest molplatte_preprocess/tests -q -k OdorlessIsNot; then
+            echo "::error::guards PASSED with the bug reintroduced -- they are vacuous"
+            cp /tmp/condvec.bak "$f"
+            exit 1
+          fi
+          cp /tmp/condvec.bak "$f"
+          echo "guards correctly fail when the bug is reintroduced"
+        env:
+          PYTHONPATH: ${{ github.workspace }}/molplatte_preprocess/src
