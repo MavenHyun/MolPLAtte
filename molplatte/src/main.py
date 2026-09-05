@@ -200,6 +200,12 @@ def get_callbacks(config: DictConfig, ckpt_path: Path) -> List[pl.Callback]:
     es_min_delta = float(es_cfg.get("min_delta", 0.0))
     es_monitor  = str(es_cfg.get("monitor", "val/loss"))
     es_mode     = str(es_cfg.get("mode", "min"))
+    # The final deliverable checkpoint trains on ALL records with no validation
+    # split, because the fold estimates already sized the effect and holding
+    # data back would only shrink the model that ships. With no val/loss to
+    # monitor, EarlyStopping raises rather than degrading -- so it is switched
+    # off explicitly instead of being fed a metric that does not exist.
+    es_enabled = bool(es_cfg.get("enabled", True))
     ckpt_cfg = config.get("checkpoint", {}) or {}
     ckpt_monitor = str(ckpt_cfg.get("monitor", es_monitor))
     ckpt_mode    = str(ckpt_cfg.get("mode", es_mode))
@@ -214,11 +220,12 @@ def get_callbacks(config: DictConfig, ckpt_path: Path) -> List[pl.Callback]:
                                 monitor=ckpt_monitor, mode=ckpt_mode,
                                 filename=ckpt_filename),
         pl.callbacks.LearningRateMonitor(logging_interval="step"),
-        pl.callbacks.EarlyStopping(monitor=es_monitor, mode=es_mode,
-                                   patience=es_patience,
-                                   min_delta=es_min_delta,
-                                   check_finite=True,
-                                   verbose=True),
+        *([pl.callbacks.EarlyStopping(monitor=es_monitor, mode=es_mode,
+                                      patience=es_patience,
+                                      min_delta=es_min_delta,
+                                      check_finite=True,
+                                      verbose=True)]
+          if es_enabled else []),
         # Training and evaluation must agree on what the similarity estimates.
         # With logq_correction the critic learns log p(k|q) directly, so FAISS
         # ranks raw similarity. Without it the critic learns PMI
@@ -283,6 +290,55 @@ def get_trainer(config: DictConfig, ckpt_path: Path) -> pl.Trainer:
                       **kw)
 
 
+def load_weights_into(lightning_module, weights: Path, tag: str) -> int:
+    """Load a checkpoint into whichever nested module actually owns the names.
+
+    Resolve the target by KEY OVERLAP, never by assumed nesting.
+    SaveBestModelCheckpoint saves ``pl_module.model.model`` (the nnet), so keys
+    are ``nnet.*`` while the LightningModule's own are ``model.nnet.*``. Loading
+    one into the other matches NOTHING, and with strict=False that is silent:
+    the model stays randomly initialised and still produces a full set of
+    plausible metrics. Not hypothetical -- it produced test/loss 14.29 against
+    val 2.53 and r@1 0.0022 before being caught.
+    """
+    state = torch.load(weights, map_location="cpu", weights_only=False)
+    if isinstance(state, dict) and "state_dict" in state:
+        state = state["state_dict"]
+
+    candidates = [("lightning_module", lightning_module)]
+    inner = getattr(lightning_module, "model", None)
+    if inner is not None:
+        candidates.append(("lightning_module.model", inner))
+        inner2 = getattr(inner, "model", None)
+        if inner2 is not None:
+            candidates.append(("lightning_module.model.model", inner2))
+    keys = set(state)
+    name, target, _ = max(
+        ((n, m, len(keys & set(m.state_dict()))) for n, m in candidates),
+        key=lambda c: c[2],
+    )
+    missing, unexpected = target.load_state_dict(state, strict=False)
+    loaded = len(state) - len(unexpected)
+    if loaded == 0:
+        raise RuntimeError(
+            f"[{tag}] {weights.name} shares NO parameter names with any of "
+            f"{[n for n, _ in candidates]}; every key would be silently ignored "
+            f"and the model would score as randomly initialised. "
+            f"checkpoint[:3]={list(state)[:3]} "
+            f"module[:3]={list(target.state_dict())[:3]}"
+        )
+    if missing or unexpected:
+        logging.warning(
+            f"[{tag}] partial state_dict match for {weights.name}: "
+            f"{loaded}/{len(state)} tensors loaded, {len(missing)} missing, "
+            f"{len(unexpected)} unexpected. "
+            f"missing[:5]={list(missing)[:5]} unexpected[:5]={list(unexpected)[:5]}"
+        )
+    logging.info(f"[{tag}] loaded {loaded}/{len(state)} tensors from "
+                 f"{weights.name} into {name} ({type(target).__name__})")
+    return loaded
+
+
 def train(config: DictConfig) -> None:
     logging.info(f"STARTED =====> Initializing Configuration  "
                  f"[seed={config.random_seed}]")
@@ -308,6 +364,18 @@ def train(config: DictConfig) -> None:
                  f"[{config.lightning_module}]")
     lightning_module = get_lightning_module(config, loss_module)
     logging.info(f"FINISHED ====> Wrapping Lightning Module")
+
+    # Warm start. Distinct from Lightning's ckpt_path resume: this loads
+    # WEIGHTS ONLY, leaving optimiser state, LR schedule and epoch counter
+    # fresh, which is what finetuning onto a different corpus needs.
+    init_from = config.get("init_weights_from")
+    if init_from:
+        init_from = Path(init_from)
+        if not init_from.is_file():
+            raise FileNotFoundError(f"init_weights_from: no checkpoint at {init_from}")
+        logging.info(f"STARTED =====> Warm start from {init_from.name}")
+        load_weights_into(lightning_module, init_from, "train")
+        logging.info(f"FINISHED ====> Warm start")
 
     logging.info(f"STARTED =====> Fitting Trainer")
     trainer = get_trainer(config, ckpt_path)
@@ -347,54 +415,7 @@ def test(config: DictConfig) -> None:
             f"no checkpoint at {weights}. Train first, or pass "
             f"checkpoint_path=/path/to/weights.pt"
         )
-    state = torch.load(weights, map_location="cpu", weights_only=False)
-    if isinstance(state, dict) and "state_dict" in state:
-        state = state["state_dict"]
-
-    # SaveBestModelCheckpoint saves `pl_module.model.state_dict()`, so keys are
-    # `nnet.*`, while the LightningModule's own keys are `model.nnet.*` (it holds
-    # the LossModule as self.model). Loading the former into the latter matches
-    # NOTHING, and with strict=False that is silent: the model stays randomly
-    # initialised and still produces a full set of plausible-looking metrics.
-    # This is not hypothetical -- it produced test/loss 14.29 against val 2.53
-    # and r@1 0.0022 before being caught. Pick the target by inspecting keys.
-    # Resolve the load target by KEY OVERLAP, not by assumed nesting.
-    # SaveBestModelCheckpoint saves `pl_module.model.model` (the nnet), so the
-    # right target is two levels down -- but hard-coding that couples this to a
-    # detail that has already been wrong once, so pick whichever module actually
-    # shares parameter names.
-    candidates = [("lightning_module", lightning_module)]
-    inner = getattr(lightning_module, "model", None)
-    if inner is not None:
-        candidates.append(("lightning_module.model", inner))
-        inner2 = getattr(inner, "model", None)
-        if inner2 is not None:
-            candidates.append(("lightning_module.model.model", inner2))
-    keys = set(state)
-    name, target, overlap = max(
-        ((n, m, len(keys & set(m.state_dict()))) for n, m in candidates),
-        key=lambda c: c[2],
-    )
-    missing, unexpected = target.load_state_dict(state, strict=False)
-
-    loaded = len(state) - len(unexpected)
-    if loaded == 0:
-        raise RuntimeError(
-            f"[test] {weights.name} shares NO parameter names with any of "
-            f"{[n for n, _ in candidates]}; every key would be silently ignored and "
-            f"the model would score as randomly initialised. "
-            f"checkpoint[:3]={list(state)[:3]} "
-            f"module[:3]={list(target.state_dict())[:3]}"
-        )
-    if missing or unexpected:
-        logging.warning(
-            f"[test] partial state_dict match for {weights.name}: "
-            f"{loaded}/{len(state)} tensors loaded, {len(missing)} missing, "
-            f"{len(unexpected)} unexpected. "
-            f"missing[:5]={list(missing)[:5]} unexpected[:5]={list(unexpected)[:5]}"
-        )
-    logging.info(f"[test] loaded {loaded}/{len(state)} tensors from "
-                 f"{weights.name} into {name} ({type(target).__name__})")
+    load_weights_into(lightning_module, weights, "test")
 
     logging.info(f"STARTED =====> Testing on the held-out split")
     trainer = get_trainer(config, ckpt_path)

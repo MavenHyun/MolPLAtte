@@ -25,6 +25,21 @@ checkpoint_mode: false
 # Full-corpus R-group library retrieval (MolPLA's RGR evaluation).
 # Requires a vocabulary built by molplatte_preprocess/enumerate_rgroups.py;
 # the callback disables itself with a warning if none is found.
+# Warm start: load WEIGHTS ONLY from a checkpoint before fitting. Optimiser
+# state, LR schedule and epoch counter stay fresh, which is what finetuning onto
+# a different corpus needs -- unlike Lightning's ckpt_path, which resumes a run.
+#
+# Widths must match. A flavor-only checkpoint has a 324-input query projector
+# and a pocket-conditioned model wants 356; expand it first with
+# scripts/expand_checkpoint_for_pocket.py.
+init_weights_from: null
+
+early_stopping:
+  enabled:  true      # false for a full-data run with no validation split
+  monitor:  val/loss
+  mode:     min
+  patience: 10
+
 rgroup_library:
   enabled:            true
   vocab_path:         null   # defaults to <corpus>/rgroup_vocab.pkl.gz

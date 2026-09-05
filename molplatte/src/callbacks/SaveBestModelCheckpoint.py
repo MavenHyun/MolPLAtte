@@ -35,7 +35,27 @@ class SaveBestModelCheckpoint(pl.Callback):
     def _is_better(self, current: float) -> bool:
         return (current < self.best) if self.mode == "min" else (current > self.best)
 
+    def on_train_epoch_end(self, trainer, pl_module):
+        """Also save when there is no validation loop to hang off.
+
+        The final deliverable checkpoint trains on ALL records with
+        limit_val_batches=0, so on_validation_epoch_end never fires. Without
+        this the run completes normally, logs a full set of training metrics,
+        and writes no checkpoint at all -- a silent failure that only shows up
+        when someone goes looking for the file.
+
+        Guarded on the monitor being a TRAIN metric, not merely on it being
+        present. callback_metrics persists across epochs, so from epoch 2 on a
+        normal run would re-enter here with the PREVIOUS epoch's val/loss and
+        compare a stale value.
+        """
+        if self.monitor.startswith("train"):
+            self._save_if_better(trainer, pl_module)
+
     def on_validation_epoch_end(self, trainer, pl_module):
+        self._save_if_better(trainer, pl_module)
+
+    def _save_if_better(self, trainer, pl_module):
         current = trainer.callback_metrics.get(self.monitor)
         if current is None:
             return
