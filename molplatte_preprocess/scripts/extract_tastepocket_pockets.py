@@ -28,16 +28,10 @@ if str(SRC) not in sys.path:
 
 import prody  # noqa: E402
 
-from molplatte_prep.pocket_ligands import _parse_structure, pocket_residues  # noqa: E402
+from molplatte_prep.pocket_ligands import (AA3to1, chain_sequence,  # noqa: E402
+                                           _parse_structure, pocket_residues)
 
 prody.confProDy(verbosity="none")
-
-AA3to1 = {
-    "ALA": "A", "ARG": "R", "ASN": "N", "ASP": "D", "CYS": "C", "GLN": "Q",
-    "GLU": "E", "GLY": "G", "HIS": "H", "ILE": "I", "LEU": "L", "LYS": "K",
-    "MET": "M", "PHE": "F", "PRO": "P", "SER": "S", "THR": "T", "TRP": "W",
-    "TYR": "Y", "VAL": "V", "MSE": "M", "SEC": "U", "PYL": "O",
-}
 
 #: Below this a "pocket" is a surface contact, not an enclosed site. Chosen to
 #: be permissive -- the point is to drop degenerate cases, not to curate.
@@ -53,26 +47,6 @@ MIN_POCKET_RESIDUES = 8
 #: Every pocket built around a backbone residue is meaningless, and nothing
 #: about it errors -- the pockets are the right shape and full of real atoms.
 MIN_POLYMER_CHAIN = 20
-
-
-def chain_sequence(structure, chid):
-    """(one-letter sequence, {resnum: index}) for one chain's CA trace.
-
-    Keyed on residue number rather than position because deposited structures
-    have gaps; using enumerate() directly would silently shift every index
-    after the first missing loop.
-    """
-    sel = structure.select(f"protein and chain {chid} and name CA")
-    if sel is None:
-        return "", {}
-    seq, index_of = [], {}
-    for res in sel.getHierView().iterResidues():
-        code = AA3to1.get(res.getResname().strip().upper())
-        if code is None:
-            continue
-        index_of[int(res.getResnum())] = len(seq)
-        seq.append(code)
-    return "".join(seq), index_of
 
 
 def main() -> int:

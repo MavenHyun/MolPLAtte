@@ -288,6 +288,15 @@ def _parse_structure(path: Path):
     return prody.parsePDB(str(path))
 
 
+#: Three-letter to one-letter residue codes, including the modified residues
+#: that appear in deposited structures often enough to matter.
+AA3to1: Dict[str, str] = {
+    "ALA": "A", "ARG": "R", "ASN": "N", "ASP": "D", "CYS": "C", "GLN": "Q",
+    "GLU": "E", "GLY": "G", "HIS": "H", "ILE": "I", "LEU": "L", "LYS": "K",
+    "MET": "M", "PHE": "F", "PRO": "P", "SER": "S", "THR": "T", "TRP": "W",
+    "TYR": "Y", "VAL": "V", "MSE": "M", "SEC": "U", "PYL": "O",
+}
+
 #: A chain with at least this many amino acids is the protein, not a ligand.
 #: Needed to tell a free amino-acid LIGAND from the polymer residues sharing its
 #: name: mmCIF records free amino acids as ATOM, not HETATM. In 7DTU the
@@ -298,11 +307,31 @@ def _parse_structure(path: Path):
 MIN_POLYMER_CHAIN = 20
 
 #: Residues that are amino acids for the purpose of deciding "is this a polymer".
-_STANDARD_AA = {
-    "ALA", "ARG", "ASN", "ASP", "CYS", "GLN", "GLU", "GLY", "HIS", "ILE",
-    "LEU", "LYS", "MET", "PHE", "PRO", "SER", "THR", "TRP", "TYR", "VAL",
-    "MSE", "SEC", "PYL",
-}
+_STANDARD_AA = set(AA3to1)
+
+
+
+
+def chain_sequence(structure, chid) -> Tuple[str, Dict[int, int]]:
+    """``(one-letter sequence, {residue number: index})`` for one chain's CA trace.
+
+    Keyed on residue NUMBER rather than position. Deposited structures have
+    unmodelled loops, so ``enumerate()`` over the present residues would shift
+    every index after the first gap -- and a shifted index silently pools the
+    wrong residues into the pocket embedding.
+    """
+    sel = structure.select(f"protein and chain {chid} and name CA")
+    if sel is None:
+        return "", {}
+    seq: List[str] = []
+    index_of: Dict[int, int] = {}
+    for res in sel.getHierView().iterResidues():
+        code = AA3to1.get(res.getResname().strip().upper())
+        if code is None:
+            continue
+        index_of[int(res.getResnum())] = len(seq)
+        seq.append(code)
+    return "".join(seq), index_of
 
 
 def polymer_chain_ids(structure, min_length: int = MIN_POLYMER_CHAIN) -> Set[str]:
