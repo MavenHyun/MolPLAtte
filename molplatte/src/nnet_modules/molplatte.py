@@ -46,6 +46,7 @@ from torch import nn
 from torch_geometric.nn import global_add_pool, global_mean_pool
 
 from . import encoders as encoder_registry
+from .components import PocketConditioning
 from . import heads as head_registry
 from .heads import projectors as projector_registry
 
@@ -85,6 +86,21 @@ class MolPLAtteConfig:
     query_projector_kwargs: dict = field(default_factory=dict)
     rgroup_projector: str = "MLPProjector"
     rgroup_projector_kwargs: dict = field(default_factory=dict)
+
+    #: Width of the RAW pocket half inside condvec_dim. 0 means the condition
+    #: vector is flavor only. When set, ``condvec_dim`` stays the width the
+    #: CORPUS stores (24 + 1280 = 1304) and the query projector sees the
+    #: narrower projected width instead -- the two are no longer the same
+    #: number, which is the whole point of the projection.
+    pocket_input_dim: int = 0
+    #: Width the pocket half is projected to before it reaches the query.
+    #: Keep it the same order as the flavor half; 1280 raw floats beside 24
+    #: sparse bits is a pocket vector with some noise attached, not a condition
+    #: vector with two halves.
+    pocket_dim: int = 32
+    #: Probability of dropping a row's pocket half entirely during training, so
+    #: the model must stay able to answer from flavor alone.
+    pocket_dropout: float = 0.0
 
     #: Assembly head -- recovers the chemistry masking destroyed at each joint,
     #: which is what turns "retrieve this R-group" into "attach it like this".
@@ -126,8 +142,25 @@ class MolPLAtteConfig:
         # 4.09x more per-dimension than the 300 node dimensions. MolPLA's own
         # `Cond. None` ablation collapses its MRR 0.2616 -> 0.0056; a 47x drop
         # from removing an "auxiliary" hint means it was never auxiliary.
+        if self.pocket_input_dim:
+            if self.pocket_input_dim >= self.condvec_dim:
+                raise ValueError(
+                    f"pocket_input_dim {self.pocket_input_dim} must be smaller "
+                    f"than condvec_dim {self.condvec_dim}; condvec_dim is the "
+                    "width the CORPUS stores, flavor half included"
+                )
+            self.flavor_dim = self.condvec_dim - self.pocket_input_dim
+            self.query_condvec_dim = self.flavor_dim + self.pocket_dim
+        else:
+            self.flavor_dim = self.condvec_dim
+            self.query_condvec_dim = self.condvec_dim
+
         if self.query_projector_kwargs.get("input_dim") is None:
-            self.query_projector_kwargs["input_dim"] = self.hidden_dim + self.condvec_dim
+            # NOT condvec_dim: with a pocket half the stored width and the
+            # width the query sees are different numbers.
+            self.query_projector_kwargs["input_dim"] = (
+                self.hidden_dim + self.query_condvec_dim
+            )
         if self.graph_pooling not in _POOLING:
             raise ValueError(
                 f"unknown graph_pooling {self.graph_pooling!r}; "
@@ -153,6 +186,15 @@ class MolPLAtte(nn.Module):
         )
         self.nnet["node_projector"] = getattr(projector_registry, c.node_projector)(
             **c.node_projector_kwargs
+        )
+        # Identity when pocket_input_dim is 0, so flavor-only runs are
+        # unchanged and the module can stay in the graph unconditionally.
+        self.nnet["pocket_conditioning"] = PocketConditioning(
+            flavor_dim=c.flavor_dim,
+            pocket_input_dim=c.pocket_input_dim,
+            pocket_dim=c.pocket_dim,
+            dropout=c.dropout_rate,
+            pocket_dropout=c.pocket_dropout,
         )
         self.nnet["query_projector"] = getattr(projector_registry, c.query_projector)(
             **c.query_projector_kwargs
@@ -229,6 +271,8 @@ class MolPLAtte(nn.Module):
                 f"condvec width {condvec.shape[-1]} != configured condvec_dim "
                 f"{c.condvec_dim}; the corpus and nnet_module config disagree"
             )
+        if use_condvec:
+            condvec = self.nnet["pocket_conditioning"](condvec)
         query_input = torch.cat([q_i, condvec], dim=-1) if use_condvec else q_i
         z_C = self.nnet["query_projector"](query_input)
         rgroup_pooled = self.pool(
@@ -319,6 +363,9 @@ class MolPLAtte(nn.Module):
                 f"condvec width {condvec.shape[-1]} != configured condvec_dim "
                 f"{self.config.condvec_dim}"
             )
+        projected = self.nnet["pocket_conditioning"](
+            condvec.to(node_embeddings.dtype)
+        )
         return self.nnet["query_projector"](
-            torch.cat([node_embeddings, condvec.to(node_embeddings.dtype)], dim=-1)
+            torch.cat([node_embeddings, projected], dim=-1)
         )

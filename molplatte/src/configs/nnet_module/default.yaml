@@ -19,6 +19,20 @@ nnet_module_kwargs:
                                       # took hit@1 from 0.6111 to 0.0000. Set >0 only
                                       # to reproduce that setup deliberately.
 
+  # --- pocket conditioning -------------------------------------------------
+  # condvec_dim above is the width the CORPUS stores. With a pocket half those
+  # are different numbers: the tastepocket corpus stores 1304 (24 flavor + 1280
+  # raw ESM-2), and the query projector sees 24 + pocket_dim instead.
+  #
+  # The raw embedding is NOT stored pre-reduced, because the reduction has to be
+  # learned -- 1280 dense floats concatenated beside 24 sparse bits and 300 node
+  # dims would be 80% of the query input and would dominate by magnitude alone.
+  pocket_input_dim:          0        # 0 = flavor only; 1280 for ESM-2 650M
+  pocket_dim:                32       # projected width; keep it near flavor's 24
+  pocket_dropout:            0.0      # drop the whole pocket half per row, so the
+                                      # model cannot collapse onto it and stays
+                                      # able to answer from flavor alone
+
   # SimSiam-style stop-gradient toggles (MolPLA settings.yaml sg_P/sg_R/sg_Q).
   # All three losses are contrastive with no negative-free branch, so these are
   # MolPLA's only collapse mitigation. MolDAM has no equivalent -- do not drop
