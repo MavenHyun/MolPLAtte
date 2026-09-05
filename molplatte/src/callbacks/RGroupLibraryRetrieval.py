@@ -427,6 +427,18 @@ class RGroupLibraryRetrieval(pl.Callback):
             )
             if cut in (1, 10, 100):
                 summary.append(f"H@{cut}={hit:.4f}(prior {prior:.4f})")
+                # The split goes on the CONSOLE line, not only into log_dict.
+                # The log file is what survives a run and what gets read months
+                # later; a metric that exists only in the logger is invisible to
+                # anyone reading the artifact. And this is the metric that says
+                # whether the pocket stage generalised at all -- a healthy
+                # hit@K beside a collapsed novel_hit@K means the model retrieved
+                # chemistry it already knew.
+                if novel_mask is not None:
+                    for sub in ("base", "novel"):
+                        key = f"{stage}/library/{sub}_hit@{cut}"
+                        if key in metrics:
+                            summary.append(f"{sub}_hit@{cut}={metrics[key]:.4f}")
 
         pl_module.log_dict(metrics, on_epoch=True, sync_dist=True)
         logger.info(
