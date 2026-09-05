@@ -105,6 +105,50 @@ class TestFlavorCondvecReadsItsTables:
         assert CONDVEC_VERSION >= 2
 
 
+class TestOdorlessIsNotAssertedAlongsideAnOdour:
+    """`odorless` claims nothing is smelled; an odour class contradicts it.
+
+    145 rows of flavor_measured.jsonl (1.3%) assert both -- a merge artifact,
+    e.g. FDB72 ['medicinal', 'odorless', 'woody']. Nothing failed: the vector
+    simply carried two incompatible bits and the model had to learn around it.
+
+    Taste is a separate axis. A taste receptor sits in solution, so sucrose is
+    correctly both `odorless` and `sweet`, and clearing `odorless` there would
+    destroy real information.
+    """
+
+    @pytest.fixture
+    def encoder(self):
+        return FlavorCondVec(measured={
+            "ODOUR": ["medicinal", "odorless", "woody"],
+            "TASTE": ["odorless", "sweet"],
+            "BOTH": ["odorless", "sweet", "woody"],
+            "PLAIN": ["odorless"],
+        })
+
+    def test_odour_class_clears_odorless(self, encoder):
+        got = bits(encoder.encode(None, {"inchikey": "ODOUR"}))
+        assert got == {"medicinal", "woody"}
+
+    def test_taste_does_not_clear_odorless(self, encoder):
+        """Sucrose is odorless and sweet. Both bits are correct."""
+        got = bits(encoder.encode(None, {"inchikey": "TASTE"}))
+        assert got == {"odorless", "sweet"}
+
+    def test_odour_wins_even_when_a_taste_is_also_present(self, encoder):
+        got = bits(encoder.encode(None, {"inchikey": "BOTH"}))
+        assert got == {"sweet", "woody"}
+
+    def test_odorless_alone_survives(self, encoder):
+        assert bits(encoder.encode(None, {"inchikey": "PLAIN"})) == {"odorless"}
+
+    def test_taste_and_odour_label_sets_partition_the_vocabulary(self):
+        from molplatte_prep.condvec import ODOUR_LABELS, TASTE_LABELS
+
+        assert not (TASTE_LABELS & ODOUR_LABELS)
+        assert TASTE_LABELS | ODOUR_LABELS | {"odorless", "unknown"} == set(FLAVOR_LABELS)
+
+
 class TestMolContextKeySpellings:
     """COCONUT uses snake_case, FlavorDB uses PubChem CamelCase.
 

@@ -213,6 +213,14 @@ _FLAVOR_IDX = {l: i for i, l in enumerate(FLAVOR_LABELS)}
 _ODORLESS_I = _FLAVOR_IDX["odorless"]
 _UNKNOWN_I = _FLAVOR_IDX["unknown"]
 
+#: The five taste primaries. A taste receptor sits in solution, so these are
+#: compatible with `odorless` -- sucrose is both, and so is glutamate.
+TASTE_LABELS = frozenset(FLAVOR_LABELS[:5])
+
+#: The seventeen odour classes. These CONTRADICT `odorless`, which is a
+#: positive claim that nothing is smelled.
+ODOUR_LABELS = frozenset(FLAVOR_LABELS[5:22])
+
 #: Molecular weight above which a compound cannot reach an olfactory receptor.
 #: Real odorants (FlavorDB, non-imputed) have median MW 170 with 8.5% above 350;
 #: COCONUT has median 433 with 71.2% above. This is a claim about VOLATILITY and
@@ -269,10 +277,25 @@ class FlavorCondVec(CondVecEncoder):
 
     def _set(self, labels: Sequence[str]) -> np.ndarray:
         v = np.zeros(self.dim, dtype=np.float32)
+        seen = set()
         for l in labels:
-            i = _FLAVOR_IDX.get(str(l).strip().lower())
+            name = str(l).strip().lower()
+            i = _FLAVOR_IDX.get(name)
             if i is not None:
                 v[i] = 1.0
+                seen.add(name)
+
+        # `odorless` asserts that nothing is smelled, so it cannot hold
+        # alongside an odour class. 145 rows of flavor_measured.jsonl (1.3%)
+        # carry both -- a merge artifact from combining sources without
+        # resolving conflicts, e.g. FDB72 ['medicinal', 'odorless', 'woody'].
+        # The odour descriptor is the specific claim and wins.
+        #
+        # Taste is NOT affected: a taste receptor sits in solution, so
+        # `odorless` + `sweet` is the correct description of sucrose.
+        if seen & ODOUR_LABELS:
+            v[_ODORLESS_I] = 0.0
+
         if not v.any():
             v[_UNKNOWN_I] = 1.0
         return v
@@ -365,7 +388,7 @@ def load_flavor_tables(measured_path=None, mined_path=None):
 #: incomparable. v1 corpora are unusable for conditioning: mol_context was read
 #: from a record that had no `meta` yet, so no label table was ever consulted and
 #: all 24 bits collapsed to a single MW>350 indicator (fixed 2026-09).
-CONDVEC_VERSION = 2
+CONDVEC_VERSION = 3
 
 CONDVEC_MODES = ("neutral", "pocket", "flavor", "two_part")
 
