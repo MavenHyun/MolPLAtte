@@ -37,6 +37,7 @@ from __future__ import annotations
 import csv
 import io
 import logging
+import json
 import os
 import pickle
 import sys
@@ -55,6 +56,7 @@ __all__ = [
     "read_flavordb",
     "read_coconut",
     "read_crossdocked",
+    "read_tastepocket",
     "read_source",
     "SOURCES",
 ]
@@ -480,11 +482,86 @@ def read_crossdocked(
             return
 
 
+def read_tastepocket(
+    path: str,
+    *,
+    limit: Optional[int] = None,
+    size_filter: Optional[SizeFilter] = None,
+    **_: object,
+) -> Iterator[SourceRecord]:
+    """Stream the tastepocket fine-tuning set built by build_tastepocket_dataset.py.
+
+    ONE RECORD PER (LIGAND, RECEPTOR), already aggregated upstream. Do not
+    re-expand to pocket instances: 1,255 sites collapse to 269 records because a
+    homotetramer deposits the same ligand four times, and counting those
+    separately inflates the R-group frequency prior that Hit@K is judged against
+    and that the logQ correction subtracts.
+
+    Each record carries its ESM-2 pocket embedding RAW, at the language model's
+    own width. ``StoredPocketCondVec`` hands it through unreduced;
+    ``PocketConditioning`` learns the reduction inside the model.
+
+    meta
+        ``ccd``                PDB chemical component id
+        ``uniprot``            receptor identity the fold was cut on
+        ``fold``               CV fold, 0-4; the final checkpoint ignores it
+        ``component``          bipartite component the fold was cut from
+        ``families``           receptor families, semicolon-joined
+        ``flavor_labels``      resolved sensory labels, semicolon-joined
+        ``flavor_source``      measured / mined / llm / llm_abstain
+        ``pdb_ids``            entries this (ligand, receptor) pair came from
+        ``pocket_embedding``   the raw pocket vector
+        ``InChIKey``           joins the flavor tables
+    """
+    n = 0
+    with open(path) as fh:
+        for line in fh:
+            line = line.strip()
+            if not line:
+                continue
+            rec = json.loads(line)
+            smiles = rec.get("smiles") or ""
+            if not smiles:
+                continue
+            if size_filter is not None:
+                mol = Chem.MolFromSmiles(smiles)
+                if not size_filter.accepts(mol):
+                    continue
+            yield SourceRecord(
+                mol_id=rec["id"],
+                smiles=smiles,
+                source="tastepocket",
+                meta={
+                    "ccd": rec.get("ccd", ""),
+                    "uniprot": rec.get("uniprot", ""),
+                    "fold": str(rec.get("fold", "")),
+                    "component": str(rec.get("component", "")),
+                    "families": ";".join(rec.get("families") or []),
+                    "cats": ";".join(rec.get("cats") or []),
+                    "organisms": ";".join(rec.get("organisms") or []),
+                    "pdb_ids": ";".join(rec.get("pdb_ids") or []),
+                    "flavor_labels": ";".join(rec.get("flavor_labels") or []),
+                    "flavor_source": rec.get("flavor_source", ""),
+                    "n_instances": str(rec.get("n_instances", "")),
+                    "InChIKey": rec.get("inchikey", ""),
+                    "name": rec.get("name") or "",
+                    "pocket_embedding": rec.get("pocket_embedding") or [],
+                },
+            )
+            n += 1
+            if limit and n >= limit:
+                return
+
+
 SOURCES: Dict[str, Tuple[object, str]] = {
     "flavordb": (read_flavordb, os.path.expanduser("~/datasets/flavordb")),
     "coconut": (
         read_coconut,
         os.path.expanduser("~/datasets/coconut/coconut_sdf_3d-08-2026.sdf"),
+    ),
+    "tastepocket": (
+        read_tastepocket,
+        os.path.expanduser("~/preprocessed/molplatte/tastepocket/dataset.jsonl"),
     ),
     "crossdocked": (
         read_crossdocked,

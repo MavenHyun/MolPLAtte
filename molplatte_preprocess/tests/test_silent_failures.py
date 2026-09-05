@@ -358,6 +358,68 @@ class TestFreeAminoAcidLigandsAreNotPolymerResidues:
         assert len(ligand_instances(structure, "NAG")) == 14
 
 
+class TestCondvecStorageDtype:
+    """uint8 storage silently destroys a real-valued condition vector.
+
+    The corpus stored rgroup_condvecs as uint8, which is correct and compact
+    for 24 binary flavor bits. An ESM-2 pocket embedding is negative floats:
+    -6.668 wraps to 250 and everything in (-1, 1) truncates to 0. The stored
+    array then has exactly the right shape and dtype and contains none of the
+    original information -- the pocket half of the corpus was integers drawn
+    from {0, 250, 255} and nothing downstream could detect it.
+    """
+
+    def test_binary_encoders_stay_uint8(self):
+        """Existing corpora must not be invalidated: their bits are 0/1."""
+        import numpy as np
+
+        from molplatte_prep.condvec import FlavorCondVec, NeutralCondVec
+
+        assert np.dtype(FlavorCondVec().storage_dtype) == np.uint8
+        assert np.dtype(NeutralCondVec().storage_dtype) == np.uint8
+
+    def test_stored_pocket_declares_float(self):
+        import numpy as np
+
+        from molplatte_prep.condvec import StoredPocketCondVec
+
+        assert np.dtype(StoredPocketCondVec(8).storage_dtype) == np.float32
+
+    def test_two_part_widens_to_the_real_valued_half(self):
+        """24 binary bits beside 1280 floats must not be stored as uint8."""
+        import numpy as np
+
+        from molplatte_prep.condvec import (FlavorCondVec, PocketCondVec,
+                                            StoredPocketCondVec, TwoPartCondVec)
+
+        zeros = TwoPartCondVec(FlavorCondVec(), PocketCondVec(dim=0))
+        assert np.dtype(zeros.storage_dtype) == np.uint8
+
+        stored = TwoPartCondVec(FlavorCondVec(), StoredPocketCondVec(1280))
+        assert np.dtype(stored.storage_dtype) == np.float32
+
+    def test_lossy_integer_cast_raises_instead_of_wrapping(self):
+        """A negative float must not become 250."""
+        import numpy as np
+
+        import preprocess_flavor as pf
+
+        pf._W["condvec"] = type("E", (), {"storage_dtype": np.uint8})()
+        with pytest.raises(ValueError, match="does not survive the cast"):
+            pf._store_condvecs([np.array([[-6.668, 0.3, 1.0]], dtype=np.float32)])
+
+    def test_float_storage_preserves_negative_values(self):
+        import numpy as np
+
+        import preprocess_flavor as pf
+
+        pf._W["condvec"] = type("E", (), {"storage_dtype": np.float32})()
+        v = np.array([[-6.668, 0.318, 0.0]], dtype=np.float32)
+        out = pf._store_condvecs([v])
+        assert out.dtype == np.float32
+        assert np.allclose(out, v)
+
+
 # ---------------------------------------------------------------- hashing
 class TestHashVersionPinned:
     def test_hash_version_matches_built_corpora(self):

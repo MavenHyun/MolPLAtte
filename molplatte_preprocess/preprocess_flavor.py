@@ -142,7 +142,11 @@ def _build_condvec(config):
     _assert_flavor_tables_reachable(fl, meas, mined)
     if mode == "flavor":
         return fl
-    return TwoPartCondVec(fl, PocketCondVec(dim=int(config.get("pocket_dim", 0))))
+    pocket_dim = int(config.get("pocket_dim", 0))
+    if pocket_dim and config.get("pocket_source") == "stored":
+        from molplatte_prep.condvec import StoredPocketCondVec
+        return TwoPartCondVec(fl, StoredPocketCondVec(dim=pocket_dim))
+    return TwoPartCondVec(fl, PocketCondVec(dim=pocket_dim))
 
 
 def _assert_flavor_tables_reachable(encoder, meas, mined) -> None:
@@ -228,6 +232,30 @@ def _first(meta: dict, keys) -> str:
     return ""
 
 
+def _store_condvecs(condvecs) -> np.ndarray:
+    """Stack condition vectors at the dtype the encoder declares.
+
+    uint8 is a quarter of the size and correct for binary flavor bits, but it
+    silently destroys a real-valued pocket embedding: ESM-2 activations are
+    negative floats, so -6.668 wraps to 250 and everything in (-1, 1) truncates
+    to 0. The corpus then holds an array of exactly the right shape and dtype
+    with none of the original information in it, and no downstream check can
+    tell. So the cast is verified rather than assumed.
+    """
+    arr = np.vstack(condvecs)
+    dtype = getattr(_W.get("condvec"), "storage_dtype", np.uint8)
+    if np.dtype(dtype).kind in "ui":
+        out = arr.astype(dtype)
+        if not np.array_equal(out.astype(arr.dtype), arr):
+            raise ValueError(
+                f"condition vector does not survive the cast to {np.dtype(dtype)}: "
+                f"range [{arr.min()}, {arr.max()}]. The encoder must declare a "
+                "floating storage_dtype."
+            )
+        return out
+    return arr.astype(dtype)
+
+
 def _mol_context(mol_id: str, meta: Optional[dict]) -> dict:
     """Molecule-level context for the flavor condvec.
 
@@ -237,12 +265,20 @@ def _mol_context(mol_id: str, meta: Optional[dict]) -> dict:
     collapsed the 24-bit flavor vector to a single MW>350 bit.
     """
     meta = meta or {}
-    return {
+    ctx = {
         "mol_id": mol_id or "",
         "inchikey": str(_first(meta, _INCHIKEY_KEYS)).strip(),
         "mw": _first(meta, _MW_KEYS) or None,
         "contains_sugar": str(meta.get("contains_sugar", "")).lower() == "true",
     }
+    # The pocket half is precomputed by the source reader and rides through on
+    # meta. Omitting it here would not fail -- StoredPocketCondVec would emit
+    # zeros for every record and the pocket half of the corpus would be
+    # uniformly empty, which is exactly how the flavor half broke before.
+    pocket = meta.get("pocket_embedding")
+    if pocket is not None:
+        ctx["pocket_embedding"] = pocket
+    return ctx
 
 
 def _process_one(item: Tuple[str, str, str, dict]) -> Tuple[str, str, Optional[dict]]:
@@ -292,7 +328,7 @@ def _process_one(item: Tuple[str, str, str, dict]) -> Tuple[str, str, Optional[d
                     hashes.append("")
                 condvecs.append(_rgroup_condvec(mol, rgroup.rgroup_atoms))
             record["rgroup_hashes"] = hashes
-            record["rgroup_condvecs"] = np.vstack(condvecs).astype(np.uint8)
+            record["rgroup_condvecs"] = _store_condvecs(condvecs)
             records.append(record)
 
         payload = {
@@ -353,7 +389,8 @@ def _source_items(args, size_filter: SizeFilter, skip: set) -> Iterator[tuple]:
     rng = random.Random(args.sample_seed)
     emitted = 0
     paths = {"flavordb": args.flavordb_path, "coconut": args.coconut_path,
-             "crossdocked": args.crossdocked_path}
+             "crossdocked": args.crossdocked_path,
+             "tastepocket": args.tastepocket_path}
     # Optional id whitelist. FlavorDB records are exempt: they are labelled by
     # construction, so the filter exists to thin the COCONUT half.
     include = None
@@ -405,7 +442,7 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     source.add_argument(
         "--source",
         nargs="+",
-        choices=("flavordb", "coconut", "crossdocked"),
+        choices=("flavordb", "coconut", "crossdocked", "tastepocket"),
         required=True,
         help="one or more sources; several are merged into a single corpus",
     )
@@ -420,6 +457,9 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
                              "only; other artifacts stay filtered.")
     source.add_argument("--crossdocked-path", default=None,
                         help="processed pocket10 LMDB; default is the one in ~/datasets")
+    source.add_argument("--tastepocket-path", default=None,
+                        help="dataset.jsonl from build_tastepocket_dataset.py; "
+                             "default is the one in ~/preprocessed/molplatte")
     source.add_argument(
         "--no-dedup",
         action="store_true",
@@ -477,6 +517,10 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         "formal_charge to one class.",
     )
     decomp.add_argument("--condvec-mode", choices=CONDVEC_MODES, default="neutral")
+    decomp.add_argument("--pocket-source", choices=("zeros", "stored"), default="zeros",
+                        help="'stored' reads the pocket half from each record's "
+                             "meta (written by the source reader); 'zeros' leaves "
+                             "it empty, reproducing the ligand-only ablation")
     decomp.add_argument("--flavor-measured", default=None,
                         help="jsonl of MEASURED flavor labels (FlavorDB etc.)")
     decomp.add_argument("--flavor-mined", default=None,
@@ -524,6 +568,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     size_filter = SizeFilter(args.min_heavy_atoms, args.max_heavy_atoms)
     method_kwargs = _build_method_kwargs(args)
     _cv_cfg = {"condvec_mode": args.condvec_mode,
+               "pocket_source": args.pocket_source,
                "flavor_measured": args.flavor_measured,
                "flavor_mined": args.flavor_mined,
                "pocket_dim": args.pocket_dim}
@@ -555,6 +600,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         "keep_stereo": args.keep_stereo,
         "neutralise": args.neutralise,
         "condvec_mode": args.condvec_mode,
+        "pocket_source": args.pocket_source,
         "flavor_measured": args.flavor_measured,
         "flavor_mined": args.flavor_mined,
         "pocket_dim": args.pocket_dim,
@@ -568,7 +614,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         ("source paths", {
             k: v for k, v in
             [("flavordb", args.flavordb_path), ("coconut", args.coconut_path),
-             ("crossdocked", args.crossdocked_path)]
+             ("crossdocked", args.crossdocked_path),
+             ("tastepocket", args.tastepocket_path)]
             if k in args.source
         } or "<defaults>"),
         ("dedup", not args.no_dedup),
@@ -674,6 +721,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         "neutralise": args.neutralise,
         "size_filter": size_filter.as_dict(),
         "condvec_mode": args.condvec_mode,
+        "pocket_source": args.pocket_source,
         "flavor_measured": args.flavor_measured,
         "flavor_mined": args.flavor_mined,
         "pocket_dim": args.pocket_dim,

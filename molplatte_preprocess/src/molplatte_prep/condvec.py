@@ -84,6 +84,15 @@ class CondVecEncoder:
     #: Stable name recorded in corpus metadata.
     mode: str = "base"
 
+    #: Numpy dtype the corpus should store this encoder's output as.
+    #: uint8 is right for the binary flavor bits and the RDKit fragment counts,
+    #: and it is a quarter of the size. It is CATASTROPHIC for a real-valued
+    #: embedding: ESM-2 activations are negative floats, so -6.668 wraps to 250
+    #: and everything in (-1, 1) truncates to 0. The result is an array of the
+    #: right shape and dtype containing none of the original information, which
+    #: nothing downstream can detect. Encoders that emit real values must say so.
+    storage_dtype = np.uint8
+
     @property
     def dim(self) -> int:
         raise NotImplementedError
@@ -230,6 +239,58 @@ ODOUR_LABELS = frozenset(FLAVOR_LABELS[5:22])
 ODORLESS_MW_CUTOFF = 350.0
 
 
+class StoredPocketCondVec(CondVecEncoder):
+    """Pocket half read from the record, not computed here.
+
+    The pocket encoder is a frozen protein language model that needs a GPU and
+    the full chain sequence, neither of which belongs inside a 96-way
+    multiprocessing decomposition. So embedding happens once up front
+    (``embed_pockets_esm.py``) and the vector rides along in the record's meta;
+    this class only validates and hands it over.
+
+    The vector is stored RAW, at the language model's own width -- 1280 for
+    ESM-2 650M. It is not reduced here, because the reduction has to be learned:
+    ``nnet_modules.components.PocketConditioning`` projects it down inside the
+    model, where gradients can decide what to keep. Storing a reduced vector
+    would freeze that choice at preprocessing time.
+
+    A record with no pocket gets zeros, and zeros are meaningful downstream:
+    ``PocketConditioning`` masks an all-zero pocket half to exactly zero, so
+    ligand-only pretraining stays bit-identical to a flavor-only run.
+    """
+
+    mode = "stored_pocket"
+    storage_dtype = np.float32
+
+    #: Meta key the reader writes the embedding to.
+    KEY = "pocket_embedding"
+
+    def __init__(self, dim: int) -> None:
+        self._dim = int(dim)
+
+    @property
+    def dim(self) -> int:
+        return self._dim
+
+    def encode(self, mol: Chem.Mol, context: Optional[object] = None) -> np.ndarray:
+        ctx = context if isinstance(context, dict) else {}
+        raw = ctx.get(self.KEY)
+        if raw is None:
+            return np.zeros(self._dim, dtype=np.float32)
+        vec = np.asarray(raw, dtype=np.float32).ravel()
+        if vec.shape[0] != self._dim:
+            # Silently truncating or padding here would produce a corpus whose
+            # pocket half is misaligned with the encoder that made it, and
+            # nothing downstream could tell.
+            raise ValueError(
+                f"stored pocket embedding has width {vec.shape[0]}, "
+                f"expected {self._dim}"
+            )
+        if not np.isfinite(vec).all():
+            raise ValueError("stored pocket embedding contains NaN or inf")
+        return vec
+
+
 class FlavorCondVec(CondVecEncoder):
     """24 sparse flavor bits, sourced from measurement -- never from structure.
 
@@ -343,6 +404,19 @@ class TwoPartCondVec(CondVecEncoder):
     def __init__(self, flavor: "FlavorCondVec", pocket: "PocketCondVec") -> None:
         self.flavor = flavor
         self.pocket = pocket
+
+    @property
+    def storage_dtype(self):
+        """Widen to the more permissive of the two halves.
+
+        A real-valued pocket half forces float32 for the whole vector; storing
+        the pair as uint8 to save space on the 24 flavor bits would wrap the
+        1280 pocket floats to garbage.
+        """
+        for half in (self.flavor, self.pocket):
+            if np.dtype(half.storage_dtype).kind == "f":
+                return np.float32
+        return np.uint8
 
     @property
     def dim(self) -> int:
