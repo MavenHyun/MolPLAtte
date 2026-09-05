@@ -35,6 +35,7 @@ from molplatte_prep.condvec import (  # noqa: E402
     FlavorCondVec,
 )
 from molplatte_prep.pocket_ligands import (  # noqa: E402
+    CHEMOSENSORY_COGNATE,
     MIN_HEAVY_ATOMS,
     assess_ligand,
     ccd_code_from_path,
@@ -218,6 +219,48 @@ class TestLigandValidation:
 
     def test_unparsable_is_rejected_not_raised(self):
         assert not assess_ligand(None, "ZZZ").ok
+
+
+class TestChemosensoryRescue:
+    """The CrossDocked blocklist rejects the on-target tastants.
+
+    ARTIFACT_CATEGORIES was calibrated on enzymes and drug receptors, where
+    glutamate and the polyamines are crystallisation additives. At a taste or
+    olfactory receptor they are the stimulus: 4 codes over 9 tastepocket
+    complexes, including human CaSR kokumi and fish TAAR olfaction. Nothing
+    failed -- they were simply filtered out before decomposition.
+    """
+
+    def test_cognate_tastants_are_blocked_by_default(self):
+        """The default must stay strict: these ARE additives in CrossDocked."""
+        for code in ("GLU", "SPM", "SPD", "PUT"):
+            assert is_artifact(code) == "buffer", code
+
+    def test_cognate_tastants_are_rescued_for_chemosensory_sources(self):
+        for code in ("GLU", "SPM", "SPD", "PUT"):
+            assert is_artifact(code, allow_chemosensory=True) is None, code
+
+    def test_rescue_does_not_loosen_other_categories(self):
+        for code, cat in (("MRD", "cryo"), ("ADP", "cofactor"), ("HOH", "water"),
+                          ("ZN", "ion"), ("NAG", "glycan")):
+            assert is_artifact(code, allow_chemosensory=True) == cat, code
+
+    def test_genuine_additives_stay_blocked(self):
+        """TLA is the thaumatin crystallant -- 147 entries carry it and nothing
+        else. Rescuing by category rather than by code would have admitted it."""
+        for code in ("TLA", "OGA", "MLA"):
+            assert is_artifact(code, allow_chemosensory=True) == "buffer", code
+
+    def test_rescue_list_stays_narrow(self):
+        """Each entry must name the structure where the code is the agonist."""
+        assert set(CHEMOSENSORY_COGNATE) == {"GLU", "SPM", "SPD", "PUT"}
+        for code, why in CHEMOSENSORY_COGNATE.items():
+            assert any(ch.isdigit() for ch in why), f"{code}: no PDB id cited"
+
+    def test_assess_ligand_honours_the_flag(self):
+        mol = Chem.MolFromSmiles("NCCCNCCCCNCCCN")          # spermine
+        assert not assess_ligand(mol, "SPM").ok
+        assert assess_ligand(mol, "SPM", allow_chemosensory=True).ok
 
 
 # ---------------------------------------------------------------- hashing

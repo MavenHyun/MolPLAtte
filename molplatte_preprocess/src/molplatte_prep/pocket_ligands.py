@@ -135,15 +135,48 @@ def ccd_code_from_path(path: str) -> Optional[str]:
     return m.group(1).upper() if m else None
 
 
-def is_artifact(code: Optional[str], *, keep_cofactors: bool = False) -> Optional[str]:
+#: Blocklisted codes that are the *cognate stimulus* at a chemosensory receptor.
+#:
+#: ARTIFACT_CATEGORIES was calibrated on CrossDocked, whose targets are enzymes
+#: and drug receptors. At that scale glutamate and the polyamines really are
+#: crystallisation additives. At a taste or olfactory receptor they are the
+#: thing being tasted or smelled, and blocklisting them removes exactly the
+#: on-target chemistry -- the same failure as a drug-like heavy-atom floor
+#: discarding propionate (see MIN_HEAVY_ATOMS).
+#:
+#: Deliberately narrow. Each entry names a structure where the code is the
+#: modelled agonist, not merely present in the crystal. Codes that are genuinely
+#: additives here stay blocked: TLA is the thaumatin crystallant (147 entries
+#: carry it and nothing else), OGA and MLA are common buffers with no agonist
+#: evidence at the receptors they appear with.
+CHEMOSENSORY_COGNATE: Dict[str, str] = {
+    "GLU": "umami tastant; T1R2a/T1R3 medaka sweet-umami receptor (5X2P)",
+    "SPM": "spermine, kokumi agonist at human CaSR (8SZF/8SZG/8SZH); lamprey TAAR (9VMG)",
+    "SPD": "spermidine, amine odorant at mouse and zebrafish TAAR (8IWE/8IW4/9M3Q)",
+    "PUT": "putrescine, canonical TAAR13c decay odorant (9M2O)",
+}
+
+
+def is_artifact(
+    code: Optional[str],
+    *,
+    keep_cofactors: bool = False,
+    allow_chemosensory: bool = False,
+) -> Optional[str]:
     """Artifact category of *code*, or ``None`` if it is not blocklisted.
 
     ``keep_cofactors`` re-admits nucleotides and enzyme cofactors, which are
     genuine cognate ligands for the enzymes that use them.
+
+    ``allow_chemosensory`` re-admits :data:`CHEMOSENSORY_COGNATE`. Set it for
+    sources curated as chemosensory complexes; leave it off for CrossDocked,
+    where those codes are additives.
     """
     if not code:
         return None
     code = code.strip().upper()
+    if allow_chemosensory and code in CHEMOSENSORY_COGNATE:
+        return None
     for name, codes in ARTIFACT_CATEGORIES.items():
         if code in codes:
             if name == "cofactor" and keep_cofactors:
@@ -195,6 +228,7 @@ def assess_ligand(
     code: Optional[str] = None,
     *,
     keep_cofactors: bool = False,
+    allow_chemosensory: bool = False,
     min_heavy_atoms: int = MIN_HEAVY_ATOMS,
     max_heavy_atoms: int = MAX_HEAVY_ATOMS,
 ) -> LigandVerdict:
@@ -205,7 +239,9 @@ def assess_ligand(
     (SAH 0.35, benzamidine 0.46, estrone 0.78), so a threshold tuned to remove
     the former removes plenty of the latter.
     """
-    cat = is_artifact(code, keep_cofactors=keep_cofactors)
+    cat = is_artifact(
+        code, keep_cofactors=keep_cofactors, allow_chemosensory=allow_chemosensory
+    )
     if cat:
         return LigandVerdict(False, f"artifact:{cat}", code)
     if mol is None:
@@ -256,6 +292,7 @@ def extract_ligands(
     path: str | Path,
     *,
     keep_cofactors: bool = False,
+    allow_chemosensory: bool = False,
     min_heavy_atoms: int = MIN_HEAVY_ATOMS,
 ) -> List[Tuple[str, LigandVerdict, object]]:
     """Every non-water heteroatom residue in *path*, with a verdict each.
@@ -269,6 +306,12 @@ def extract_ligands(
     matter most here -- so the SMILES on the verdict is a fallback. Prefer the
     CCD ideal SDF (``structures/ligands/<CODE>_ideal.sdf``) when one exists;
     that carries deposited bond orders.
+
+    ``allow_chemosensory`` re-admits :data:`CHEMOSENSORY_COGNATE`. Safe to set
+    on chemosensory structures even though ``GLU`` is also the standard residue
+    code for glutamate: the selection below is ``hetero``, i.e. HETATM records
+    only, and a glutamate in the polymer is an ATOM record. A ``GLU`` reaching
+    this loop is therefore always a free, unbonded ligand.
     """
     path = Path(path)
     try:
@@ -293,7 +336,11 @@ def extract_ligands(
         )
         mol = _selection_to_mol(sel)
         verdict = assess_ligand(
-            mol, code, keep_cofactors=keep_cofactors, min_heavy_atoms=min_heavy_atoms
+            mol,
+            code,
+            keep_cofactors=keep_cofactors,
+            allow_chemosensory=allow_chemosensory,
+            min_heavy_atoms=min_heavy_atoms,
         )
         out.append((key, verdict, sel))
     return out
