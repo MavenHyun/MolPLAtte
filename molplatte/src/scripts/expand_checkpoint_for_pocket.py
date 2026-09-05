@@ -6,23 +6,36 @@ takes ``hidden_dim + 24 = 324`` inputs. STEP 2 adds a projected pocket half and
 takes ``hidden_dim + 24 + pocket_dim = 356``. Exactly one tensor changes shape:
 ``nnet.query_projector.projection.0.weight``.
 
-The new columns are filled with ZEROS, and that choice is what makes the
-transfer exact rather than approximate. ``PocketConditioning`` zero-initialises
-its own output layer, so on the first step of STEP 2 the pocket half is zero
-going in AND zero-weighted coming out. The model therefore computes bit-identical
-outputs to the STEP 1 checkpoint and has to earn every subsequent departure from
-it, instead of starting from a random perturbation of a converged solution.
+The new columns are RANDOM, and that is load-bearing. Zeroing them as well is
+the obvious thing to do and it silently disables the pocket path forever:
+
+    d(loss)/d(pocket)   = W_pocket^T . d(loss)/d(z)   = 0  because W_pocket = 0
+    d(loss)/d(W_pocket) = d(loss)/d(z) (x) pocket     = 0  because pocket   = 0
+
+Each zero keeps the other pinned, so both stay at exactly zero for the whole
+run. Measured: with zero columns the gradient reaching PocketConditioning is
+0.000000; with random columns it is 437.4. The first STEP 2 sweep was run with
+zero columns and finished with |output layer| = 0.0000 in all five folds -- a
+flavour-only finetune wearing a pocket-conditioned label, and every metric
+looked normal.
+
+The transfer stays exact anyway, because only ONE side needs to be zero:
+``PocketConditioning`` zero-initialises its own output layer, so the projected
+pocket is the zero vector on step 0 and contributes nothing no matter what the
+query columns hold. The model computes bit-identical outputs to the STEP 1
+checkpoint and must earn any departure -- but now it CAN.
 
 The alternative -- storing 1280 zero floats per record so STEP 1's corpus is
 already 1304 wide -- would cost roughly 5 GB of zeros across the pretraining
 corpus to avoid a matrix reshape.
 
 Verified rather than asserted: --check reloads the result and confirms the old
-columns survived untouched and the new ones are exactly zero.
+columns survived untouched and the new ones are NOT zero.
 """
 from __future__ import annotations
 
 import argparse
+import math
 from pathlib import Path
 
 import torch
@@ -46,8 +59,12 @@ def expand(state: dict, target_in: int, key: str = QUERY_W) -> tuple[dict, int, 
             f"than the requested {target_in}. Narrowing would discard trained "
             "weights; this script only widens."
         )
-    new = w.new_zeros((out_dim, target_in))
+    new = w.new_empty((out_dim, target_in))
     new[:, :old_in] = w
+    # nn.Linear's own init for this fan-in. NOT zeros -- see the module
+    # docstring; zeros here deadlock the pocket path permanently.
+    bound = 1.0 / math.sqrt(target_in)
+    new[:, old_in:].uniform_(-bound, bound)
     state = dict(state)
     state[key] = new
     return state, old_in, target_in
@@ -82,8 +99,10 @@ def main() -> int:
         w = got[QUERY_W]
         assert w.shape[1] == target, f"reloaded width {w.shape[1]} != {target}"
         assert torch.equal(w[:, :old_in], original), "existing columns changed"
-        assert w[:, old_in:].abs().sum().item() == 0.0, "new columns are not zero"
-        print("  verified: old columns identical, new columns exactly zero")
+        assert w[:, old_in:].abs().sum().item() > 0.0, (
+            "new columns are zero -- this deadlocks the pocket path")
+        print("  verified: old columns identical, new columns non-zero "
+              f"(|w| {w[:, old_in:].abs().mean().item():.5f})")
     print(f"wrote {args.out}")
     return 0
 
