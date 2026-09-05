@@ -420,6 +420,52 @@ class TestCondvecStorageDtype:
         assert np.allclose(out, v)
 
 
+class TestReadersRunToExhaustion:
+    """Every reader must survive reaching the end of its stream.
+
+    A crossdocked logging block sat at the end of read_coconut, referring to a
+    `dropped` counter that only read_crossdocked defines. read_coconut raised
+    NameError the moment its loop finished -- so any corpus build using coconut
+    died partway with a traceback from inside the worker pool. It went unnoticed
+    because the corpora on disk predate the CrossDocked reader, and every later
+    build that touched coconut had not been re-run until now.
+
+    Exhaustion is the untested path in a generator: everything before the last
+    yield works fine.
+    """
+
+    @pytest.fixture(scope="class")
+    def sources(self):
+        from molplatte_prep.readers import SOURCES
+
+        return SOURCES
+
+    @pytest.mark.parametrize("name", ["flavordb", "coconut"])
+    def test_reader_survives_the_end_of_its_stream(self, sources, name):
+        from molplatte_prep.readers import SizeFilter, read_source
+
+        path = Path(sources[name][1])
+        if not path.exists():
+            pytest.skip(f"{name} source not present at {path}")
+        # `limit` exits through the same tail as natural exhaustion.
+        n = sum(1 for _ in read_source(name, str(path), limit=25,
+                                       size_filter=SizeFilter()))
+        assert n > 0, f"{name} yielded nothing"
+
+    def test_crossdocked_owns_its_dropped_counter(self):
+        """The counter and the line that logs it must be in the same function."""
+        import inspect
+
+        from molplatte_prep import readers
+
+        xd = inspect.getsource(readers.read_crossdocked)
+        co = inspect.getsource(readers.read_coconut)
+        assert "dropped" in xd, "read_crossdocked should build the counter"
+        assert "dropped" not in co, (
+            "read_coconut references a counter it does not define; "
+            "the logging block belongs to read_crossdocked")
+
+
 # ---------------------------------------------------------------- hashing
 class TestHashVersionPinned:
     def test_hash_version_matches_built_corpora(self):

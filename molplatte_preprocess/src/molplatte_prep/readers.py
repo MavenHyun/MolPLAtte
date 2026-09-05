@@ -325,11 +325,6 @@ def read_coconut(
         emitted += 1
         if limit is not None and emitted >= limit:
             break
-    if dropped:
-        logging.info("[crossdocked] dropped %s non-drug-like ligands: %s",
-                     f"{sum(dropped.values()):,}",
-                     ", ".join(f"{k} {v}" for k, v in
-                               sorted(dropped.items(), key=lambda x: -x[1])))
 
 
 #: ``name -> (reader, default path)``.  Paths are overridable on the CLI.
@@ -480,6 +475,12 @@ def read_crossdocked(
         emitted += 1
         if limit is not None and emitted >= limit:
             return
+
+    if dropped:
+        logging.info("[crossdocked] dropped %s non-drug-like ligands: %s",
+                     f"{sum(dropped.values()):,}",
+                     ", ".join(f"{k} {v}" for k, v in
+                               sorted(dropped.items(), key=lambda x: -x[1])))
 
 
 def read_tastepocket(
