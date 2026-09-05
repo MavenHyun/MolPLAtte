@@ -17,7 +17,7 @@ hashes stop being comparable and retrieval breaks silently rather than loudly.
 |---|---|---|
 | format | processed `pocket10` LMDB, 166,500 records | 343 mmCIF + 206 ligand SDF |
 | pockets | 166,500 (one per record) | 343 T1 complexes |
-| distinct ligands | 11,735 | 207 (T1), 26 taste-strict |
+| distinct ligands | 11,735 | 207 (T1), 186 validating |
 | chemistry | drug targets | chemosensory receptors |
 | on-target? | no | yes |
 | big enough to train an encoder? | yes | no |
@@ -231,6 +231,44 @@ python run.py … \
 Relevant flags: `--keep-artifact-ligands` (disable filtering entirely),
 `--keep-cofactors` (re-admit cofactors only).
 
+### 3.1 tastepocket
+
+```bash
+D=~/preprocessed/molplatte/tastepocket
+
+python scripts/extract_tastepocket_ligands.py --out $D/ligands.jsonl
+python scripts/extract_tastepocket_pockets.py --ligands $D/ligands.jsonl \
+                                              --out $D/pockets.jsonl
+CUDA_VISIBLE_DEVICES=1 python scripts/embed_pockets_esm.py \
+    --pockets $D/pockets.jsonl --out $D/pocket_esm2_650M.npz
+# flavour labels: tables, then a molecule-only LLM pass -> $D/flavor_labels.jsonl
+python scripts/build_tastepocket_dataset.py \
+    --pockets $D/pockets.jsonl --embeddings $D/pocket_esm2_650M.npz \
+    --flavor $D/flavor_labels.jsonl --ligands $D/ligands.jsonl \
+    --out $D/dataset.jsonl \
+    --folds-out ~/preprocessed/molplatte/tastepocket_corpus/naveja_recap/folds.json
+```
+
+Then decompose. **`--no-dedup` is required**: the same ligand at a different
+receptor is a different training example, and dedup-by-washed-structure collapses
+269 records to 164.
+
+```bash
+python preprocess_flavor.py \
+  --source tastepocket --method naveja_recap --no-dedup \
+  --output-path $DEST --workers 16 --batch-size 20 --layout hash3 \
+  --core-ratio 0.3333333333333333 --max-cores 4 --max-rgroups 8 \
+  --min-rgroup-atoms 2 --keep-stereo --no-neutralise \
+  --min-heavy-atoms 5 --max-heavy-atoms 50 \
+  --condvec-mode two_part --pocket-source stored --pocket-dim 1280 \
+  --flavor-measured $A/flavor_measured.jsonl \
+  --flavor-mined    $A/flavor_documented.jsonl
+```
+
+Training runs then go through `src/scripts/run_step2_pocket_cv.sh`, which expands
+the flavour-only STEP 1 checkpoint (324 → 356 query inputs, new columns zeroed)
+and warm-starts every fold from it.
+
 ---
 
 ## 4. Reading the results
@@ -253,12 +291,159 @@ either direction. Give pocket-stage runs their own baseline.
 
 ---
 
-## 5. Known gaps
+## 5. The tastepocket finetuning set
+
+Built by `extract_tastepocket_ligands.py` → `extract_tastepocket_pockets.py` →
+`embed_pockets_esm.py` → `build_tastepocket_dataset.py`, then decomposed with
+`--source tastepocket`.
+
+### 5.1 Ligands
+
+186 of 207 distinct T1 cognate ligands validate. Getting there needed a fix to
+the CCD blocklist: calibrated on CrossDocked's enzymes and drug receptors, it
+rejected `GLU`, `SPM`, `SPD` and `PUT` as *buffer*. At a T1R, CaSR or TAAR those
+are the stimulus — glutamate is umami, spermine is the kokumi agonist, putrescine
+is the canonical TAAR13c odorant. Four codes over nine complexes, and among the
+most on-target entries in the set. `CHEMOSENSORY_COGNATE` re-admits them per
+code; the strict default is unchanged, so CrossDocked is unaffected.
+
+> **`TLA` stays blocked.** L-tartrate is the thaumatin *crystallant* — 147
+> entries carry it and nothing else. Rescuing by category rather than by code
+> would have admitted it.
+
+### 5.2 Ligand identity is structural, not a flag
+
+A ligand named `TRP` is not the 14 tryptophans in the protein backbone. mmCIF
+records free amino acids as `ATOM`, not `HETATM`, so `hetero` cannot find them —
+and a bare `resname TRP` match sweeps up the whole polymer. In `7DTU` that turned
+2 real ligands into 30, and 445 across the set, every extra one a pocket built
+around a backbone residue. Nothing errored: the pockets were the right size and
+full of real atoms.
+
+`ligand_instances()` keeps a copy if it sits outside a polymer chain (≥20 amino
+acids) **or** is flagged hetero. The first arm catches free amino-acid agonists —
+in `7DTU` the tryptophan is chain G, one residue, 15 atoms because it carries
+OXT. CaSR and T1R are amino-acid sensors, so this is the common case here.
+
+Fixing it took the site count from 2,269 to **1,255**.
+
+### 5.3 Flavour labels
+
+Tables first (`measured` → `mined`), then a frontier LLM for the rest, then
+`unknown`. **The prompt sees the molecule only** — name and SMILES, never the
+receptor. Telling the model "this binds TRPM8" would make it answer *cooling*,
+and the flavour half of the condvec would become a re-encoding of the pocket
+half: conditioning would then show a large lift meaning nothing, because both
+halves would carry the same variable.
+
+| source | n |
+|---|---:|
+| measured | 92 |
+| llm | 10 |
+| mined | 8 |
+| llm_abstain / unlabelled | 159 |
+
+41% carry a real label. The rest is not a preprocessing failure: of 118 molecules
+the tables could not resolve, 92 are modulators, lipids or cofactors with no
+percept at all, and 19 more are **insect pheromones** — bombykol, bombykal,
+honeybee queen mandibular pheromone. Genuine stimuli with no human descriptor.
+91 of 343 T1 entries are insect OBPs, so a large part of this set is unlabellable
+in a 22-term human vocabulary by construction.
+
+Blind control: 63 ligands whose labels the measured table already knows were
+graded without telling the grader which they were. Precision 0.73, recall 0.39 —
+and all three *confident* disagreements were the table being wrong (capsaicin
+labelled `herbal, odorless`; glutamate `dairy, odorless, roasted`). That thread
+led to a real defect: 145 rows of `flavor_measured.jsonl` assert `odorless`
+alongside an odour class. Fixed at the encoder; `CONDVEC_VERSION` → 3.
+
+### 5.4 Grain and folds
+
+**One record per (ligand, receptor)** — 1,255 sites → **269 records**. Tryptophan
+at four genuinely different receptors is four datapoints; 160 crystallographic
+copies of alanine in one structure is one. The instance grain inflates the
+R-group frequency prior unevenly, and that prior is both what Hit@K is judged
+against and what logQ subtracts, so inflating it moves the number being optimised.
+
+**Five folds, not one split.** A 15% holdout is ~40 records; the seed would move
+the answer more than the model does. The deliverable checkpoint trains on all 269.
+
+**Folds cut whole connected components** of the (ligand, receptor) bipartite
+graph, so ligand- and receptor-disjointness both hold by construction and nothing
+is dropped. Splitting by receptor and patching ligand conflicts afterwards cost 64
+of 269 records and still left the halves unbalanced. 45 components, largest 20.4%.
+
+| fold | 0 | 1 | 2 | 3 | 4 |
+|---|---:|---:|---:|---:|---:|
+| records | 56 | 58 | 52 | 51 | 52 |
+
+Verified at the dataloader level, not just in the manifest: every fold disjoint on
+molecules, ligands **and** receptors.
+
+> **Fold 1 asks a harder question.** TRPV1, CaSR, TRPA1, OTOP1 and CSP are each a
+> single component, so they are all-or-nothing. Fold 1 is 52/58 TRPV1+TRPA1, which
+> makes it a held-out receptor *family* rather than a held-out receptor. Read it
+> separately rather than averaging it in.
+
+Why none of this can be random: pooled ESM-2 pocket embeddings identify the
+receptor family with **98.5% 1-NN accuracy across different PDB entries** (27.4%
+majority baseline). A random split puts the same protein on both sides and
+reports memorisation as generalisation.
+
+### 5.5 The pocket encoder
+
+Frozen ESM-2 650M, residues within 10 Å, mean-pooled over every pocket residue of
+every chain at once — pooling per chain and averaging would give a 5-residue
+contact the same weight as a 40-residue wall. The embedding is 1D; the *selection*
+is 3D, which is what keeps it usable for GPCRs where pocket residues are far apart
+in sequence (in `8F76` the propionate site draws on 100–108 and 151–157).
+
+> **The BOS offset is the trap.** ESM prepends `<cls>`, so residue *i* is token
+> *i+1*. Forgetting it shifts every pocket by one residue and raises nothing.
+> `verify_offset()` asserts the alignment against a probe instead of trusting a
+> comment.
+
+The vector is stored **raw**, at 1280. `StoredPocketCondVec` validates width and
+finiteness and hands it through unreduced; `PocketConditioning` learns the
+reduction inside the model, where gradients decide what to keep. Storing it
+pre-reduced would freeze that choice at preprocessing time; feeding it raw to the
+query would make it 80% of the input and let it dominate by magnitude.
+
+> **uint8 storage destroyed it once.** The corpus stored `rgroup_condvecs` as
+> `np.uint8` — correct for 24 binary bits, catastrophic for negative floats:
+> −6.668 wraps to 250, everything in (−1, 1) truncates to 0. Right shape, right
+> dtype, none of the information. Encoders now declare `storage_dtype` and a
+> non-round-tripping integer cast raises.
+
+### 5.6 Corpus
+
+```
+records 243   decompositions 734   R-groups 906   condvec 1304 = 24 + 1280
+```
+
+Dedup is **off** for this source: the same ligand at a different receptor is a
+different training example, and dedup-by-washed-structure collapsed 269 records to
+164, discarding exactly the pocket variation this stage learns.
+
+42 of 263 tastepocket R-groups (16.0%) are absent from the pretraining vocabulary,
+38 also absent from CrossDocked. The three-way union library is 91,935 rows and
+covers every one, so `n_target_missing` is 0 rather than silently dropping the
+novel tail from the metric.
+
+---
+
+## 6. Known gaps
 
 - The CCD blocklist (282 codes) is a curated subset, not exhaustive. Unlisted
   codes fall through to the property screen rather than being trusted.
 - The build tag (`r333-m2-h4-flavor24v2`) encodes decomposition and condvec, but
   **not which library a run scored against**. Two runs on the same corpus with
-  different libraries currently tag identically.
-- `PocketCondVec` still returns zeros — the pocket encoder does not exist. Every
-  corpus here is substrate for that stage, not the stage itself.
+  different libraries still tag identically.
+- CrossDocked has no pocket embeddings yet, so the pocket encoder currently
+  trains on 269 tastepocket records. That is far too few to learn a pocket
+  representation from scratch; CrossDocked's 11,268 ligands over 147,648 pairs
+  are the only substrate with enough receptor variety, and wiring them in means
+  recovering chain sequences from the `pocket10` LMDB.
+- Geometry is not used. The PLM path was chosen first because it needs no change
+  to the data pipeline; whether 3D structure buys anything over sequence is an
+  open question that an EGNN ablation would answer.
