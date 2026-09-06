@@ -148,3 +148,29 @@ returns it for both -- but the query counts differ slightly (183 vs 178 on fold
 3. The EGNN ablation is NOT next. Geometry cannot be the bottleneck while the
    sequence-derived signal is already being injected at half the flavour
    magnitude and doing nothing.
+
+---
+
+## Addendum: STEP 1 retrained on the condvec_version 3 corpus
+
+The corpora were rebuilt to carry the `odorless`/odour-descriptor fix, so STEP 1
+was retrained on the result. Identical seed (911012), epochs, and union library;
+the only difference is 99 corrected rows out of roughly 840k condvecs.
+
+| | MRR best | H@1 best | H@1 final | H@10 best | H@100 best |
+|---|---:|---:|---:|---:|---:|
+| v2 corpus | 0.4277 | 0.3240 | 0.3191 | 0.6307 | 0.8471 |
+| v3 corpus | 0.4247 | 0.3216 | 0.3212 | 0.6315 | 0.8452 |
+| delta | -0.0030 | -0.0024 | +0.0021 | +0.0008 | -0.0019 |
+
+Every delta is at or below 0.003 and the signs are mixed, which is what noise
+looks like. Lift at H@1 is 13.3x against 13.0x.
+
+So the fix does not change the pretraining result, and the STEP 2 conclusions --
+which were reached against the v2 checkpoint -- stand unaltered. What changes is
+reproducibility: `s1-pretrain-full-v3-s911012_best.pt` is derivable from the
+corpora currently on disk, and the v2 checkpoint is not. Prefer the v3 one for
+anything downstream.
+
+Both checkpoints are kept. Predicting they would match was cheap; confirming it
+was cheaper than discovering later that they did not.
