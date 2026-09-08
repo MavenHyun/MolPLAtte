@@ -612,6 +612,55 @@ class TestOdorlessIsNotFabricatedForZinc:
         assert bits(enc.encode(None, {"inchikey": "K", "mw": 900.0})) == {"sweet"}
 
 
+class TestRetrievalGalleryIsCapped:
+    """FAISSRetrieval searches the validation gallery AGAINST ITSELF.
+
+    Cost is quadratic in the validation set, and the callback carried a comment
+    justifying a CPU index with "the gallery here is thousands of rows, not
+    millions". That held for a 393K-molecule corpus, whose 5% split is ~20K
+    items. On ZINC the split is 1,509,773 -- 2.3 TRILLION pairs. The run wedged
+    inside a single search for three hours, emitting no output and no error;
+    only a stack dump showed where it was.
+
+    An assumption stated in a comment is not a guard. This is the guard.
+    """
+
+    def test_oversized_gallery_is_subsampled(self):
+        import sys
+
+        sys.path.insert(0, str(Path.home() / "github/MolPLAtte/molplatte/src"))
+        import numpy as np
+        import torch
+
+        from callbacks.FAISSRetrieval import FAISSRetrieval
+
+        class FakePL:
+            device = "cpu"
+
+            def log_dict(self, *a, **k): pass
+
+            def log(self, *a, **k): pass
+
+        N, cap, D = 3000, 400, 16
+        cb = FAISSRetrieval(max_gallery=cap)
+        rng = np.random.default_rng(0)
+        cb._q = [torch.from_numpy(rng.standard_normal((N, D)).astype("float32"))]
+        cb._g = [torch.from_numpy(rng.standard_normal((N, D)).astype("float32"))]
+        cb._keys = [f"h{i % 50}" for i in range(N)]
+        cb._compute_and_log(FakePL(), stage="val")   # must not raise or hang
+        assert len(cb._keys) == cap, (
+            f"keys were not subsampled with q/g: {len(cb._keys)} != {cap}; "
+            "gid is built from _keys and must line up row-for-row")
+
+    def test_default_cap_is_set(self):
+        import sys
+
+        sys.path.insert(0, str(Path.home() / "github/MolPLAtte/molplatte/src"))
+        from callbacks.FAISSRetrieval import FAISSRetrieval
+
+        assert FAISSRetrieval().max_gallery > 0, "uncapped gallery is quadratic"
+
+
 # ---------------------------------------------------------------- hashing
 class TestHashVersionPinned:
     def test_hash_version_matches_built_corpora(self):

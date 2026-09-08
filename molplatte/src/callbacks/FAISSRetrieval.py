@@ -34,13 +34,20 @@ class FAISSRetrieval(pl.Callback):
     def __init__(self,
                  # "flat_cpu" by default, not "flat_gpu": faiss-gpu-cu12 1.14.1
                  # ships no kernels for this host's RTX PRO 6000 (Blackwell,
-                 # sm_120) and dies with "no kernel image is available for
-                 # execution on the device" the first time a validation epoch
-                 # builds an index. The gallery here is thousands of rows, not
-                 # millions, so exact CPU search costs little.
+                 # sm_120) and ABORTS the process rather than raising. The torch
+                 # path computes the same exact inner products on the GPU.
                  index_type: str = "torch_gpu",
                  hnsw_m:     int = 32,
                  enable_after_epoch: int = 0,
+                 # This callback searches the validation gallery AGAINST ITSELF,
+                 # so cost is quadratic in the validation set. An earlier comment
+                 # here justified a CPU index with "the gallery is thousands of
+                 # rows, not millions" -- true for a 393K-molecule corpus whose
+                 # 5% split is ~20K items, and false for ZINC, whose split is
+                 # 1,509,773. That is 2.3 TRILLION pairs; the run wedged for
+                 # three hours inside a single search with no output and no
+                 # error before it was caught. Capped, seeded and logged.
+                 max_gallery: int = 50_000,
                  popularity_correction: bool = False,
                  temperature: float = 0.01):
         """
@@ -63,6 +70,7 @@ class FAISSRetrieval(pl.Callback):
         """
         super().__init__()
         self.index_type = index_type
+        self.max_gallery = int(max_gallery)
         self.hnsw_m     = hnsw_m
         self.enable_after_epoch = int(enable_after_epoch)
         self.popularity_correction = bool(popularity_correction)
@@ -157,6 +165,26 @@ class FAISSRetrieval(pl.Callback):
         N = q.shape[0]
         if N < 2:
             return
+
+        if self.max_gallery and N > self.max_gallery:
+            # Seeded and announced. A silent cap would make this metric quietly
+            # incomparable across corpora of different size.
+            rs = np.random.RandomState(0)
+            keep = rs.choice(N, self.max_gallery, replace=False)
+            keep.sort()
+            logging.getLogger(__name__).warning(
+                "[FAISSRetrieval] gallery %s -> %s (max_gallery); search is "
+                "quadratic, so the full set would be %.1f trillion pairs",
+                f"{N:,}", f"{self.max_gallery:,}", N * N / 1e12)
+            q = q[keep]; g = g[keep]
+            # `valid` was applied to q/g above but self._keys is still the
+            # pre-filter list, so subsample the SAME positions there. gid is
+            # built from _keys further down and must line up row-for-row.
+            if len(self._keys) == valid.shape[0]:
+                kept_keys = [k for k, v in zip(self._keys, valid) if v]
+                self._keys = [kept_keys[i] for i in keep]
+                valid = np.ones(len(self._keys), dtype=bool)
+            N = q.shape[0]
 
         # Chemical-identity group per row. Duplicates of the target are correct
         # retrievals, not errors: index-matched scoring caps a perfect model
