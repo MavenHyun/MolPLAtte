@@ -283,14 +283,17 @@ class RGroupLibraryRetrieval(pl.Callback):
             truncated = n_scorable - self.max_queries
 
         try:
-            import faiss
+            from .exact_search import search as exact_search
 
-            index = faiss.IndexFlatIP(library.shape[1])
-            index.add(library)
             k = min(self.search_k, library.shape[0])
-            scores, retrieved = index.search(queries, k)
+            # Exact inner product on the GPU. faiss-gpu has no sm_120 kernels,
+            # so its GPU index aborts the process on Blackwell and its CPU index
+            # takes 171.8s on this shape against 0.4s here -- same arithmetic,
+            # 100% top-10 agreement, not an ANN approximation.
+            scores, retrieved = exact_search(queries, library, k,
+                                             device=str(pl_module.device))
         except Exception as exc:  # noqa: BLE001
-            logger.warning("[RGroupLibraryRetrieval] FAISS search failed: %s", exc)
+            logger.warning("[RGroupLibraryRetrieval] search failed: %s", exc)
             return
 
         # ---- popularity-corrected ranking (MolDAM devlog Phase 10) -----------

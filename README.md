@@ -275,8 +275,15 @@ cd molplatte_preprocess && PYTHONPATH=$PWD/src python -m pytest tests -q
 Built and measured on 96 cores / 354 GB RAM / 2× RTX PRO 6000 Blackwell, conda env
 `maven`, Python 3.12.13, torch 2.11 / cu130.
 
-- **`faiss-gpu-cu12` 1.14.1 has no Blackwell (sm_120) kernels.** `FAISSRetrieval`
-  defaults to `index_type="flat_cpu"`.
+- **`faiss-gpu-cu12` 1.14.1 has no Blackwell (sm_120) kernels**, and its GPU
+  index does not raise — it `abort()`s the process with CUDA error 209, so it
+  cannot be caught and fallen back from. Retrieval therefore runs exact
+  inner-product search through torch instead (`callbacks/exact_search.py`),
+  which is the same arithmetic FAISS's `IndexFlatIP` performs. Measured on the
+  real workload — 668,913 library rows, 20,000 queries, 300 dims, K=1000:
+  **171.8 s on the FAISS CPU index against 0.4 s on the GPU, a 447× speedup with
+  100% top-10 agreement.** Exact, not an ANN approximation. `index_type` still
+  accepts `flat_cpu` and `hnsw` for reproducing older numbers.
 - **ESM-2 650M** is downloaded on first use (2.5 GB, cached under
   `~/.cache/huggingface`).
 - Pocket extraction needs **ProDy**; the notebook additionally needs

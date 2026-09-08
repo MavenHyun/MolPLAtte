@@ -160,7 +160,6 @@ class PredictionTable(pl.Callback):
                 self._reset(); return
             self.best = current
 
-        import faiss
         q = torch.cat(self._q).float().numpy().astype("float32")
         g = torch.cat(self._g).float().numpy().astype("float32")
         valid = (np.linalg.norm(q, axis=1) > 1e-6) & (np.linalg.norm(g, axis=1) > 1e-6)
@@ -193,8 +192,10 @@ class PredictionTable(pl.Callback):
                 got[c] = True
 
         K = min(self.k, len(seen))
-        idx_g = faiss.IndexFlatIP(D); idx_g.add(np.ascontiguousarray(g[first_row]))
-        sim_qg, top_chem = idx_g.search(q, K)
+        from .exact_search import exact_topk
+
+        sim_qg, top_chem = exact_topk(q, np.ascontiguousarray(g[first_row]), K,
+                                      device=str(pl_module.device))
         # map chemistry rank back to a representative row for display
         top_qg = first_row[top_chem]
 
