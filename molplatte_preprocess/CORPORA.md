@@ -17,12 +17,12 @@ A `HASH_VERSION` mismatch is enforced at load time: the stored `rgroup_hashes`, 
 
 | corpus | status | records | vocab | eff. | size | build tag |
 |---|---|---:|---:|---:|---:|---|
-| `coconut-flavordb-filtered` | active | 50,933 | 13,178 | 467 | 0.3 GB | `r333-m2-h4-flavor24v2` |
-| `coconut-flavordb-full` | active | 393,066 | 86,385 | 889 | 2.3 GB | `r333-m2-h4-flavor24v2` |
-| `coconut-flavordb_v7` | superseded | 393,066 | 86,385 | 889 | 2.3 GB | `r333-m2-h4-flavor24v1` |
-| `coconut-only` | active | 374,454 | 82,312 | 853 | 2.2 GB | `r333-m2-h4-flavor24v2` |
+| `coconut-flavordb-filtered` | active | 50,933 | 13,178 | 467 | 0.3 GB | `r333-m2-h4-flavor24v3` |
+| `coconut-flavordb-full` | active | 393,066 | 86,385 | 889 | 2.3 GB | `r333-m2-h4-flavor24v3` |
+| `coconut-only` | active | 374,454 | 82,312 | 853 | 2.2 GB | `r333-m2-h4-flavor24v3` |
 | `crossdocked` | active | 10,689 | 9,435 | 1478 | 0.1 GB | `r333-m2-h4-flavor24v2` |
-| `flavordb-only` | active | 20,812 | 6,182 | 299 | 0.1 GB | `r333-m2-h4-flavor24v2` |
+| `flavordb-only` | active | 20,812 | 6,182 | 299 | 0.1 GB | `r333-m2-h4-flavor24v3` |
+| `tastepocket_corpus` | UNDOCUMENTED | 243 | 263 | 129 | 0.0 GB | `r333-m2-h4-two_part1304v3` |
 
 ## What each is for
 
@@ -33,10 +33,6 @@ Both sources, COCONUT restricted to the odorant physicochemical envelope (MW 108
 ### `coconut-flavordb-full` — active
 
 Both sources, unfiltered. The default pretraining corpus.
-
-### `coconut-flavordb_v7` — superseded
-
-Same content as coconut-flavordb-full. Retained because the three-arm condvec shuffle test was run against it; deleting it orphans those results.
 
 ### `coconut-only` — active
 
@@ -49,6 +45,10 @@ CrossDocked2020 ligands from the processed pocket10 LMDB, ONE RECORD PER DISTINC
 ### `flavordb-only` — active
 
 FlavorDB alone. Every molecule carries a measured flavor label, so the condvec is dense. Small; use for conditioning experiments where label coverage matters more than scale.
+
+### `tastepocket_corpus` — UNDOCUMENTED
+
+Not described in write_corpora_manifest.py. Either document it or delete it.
 
 ## Shared build settings
 
@@ -77,7 +77,10 @@ condvec           flavor(24)    molecule-level, from measurement /
 
 An all-zero vector is never emitted. Zero would mean "no flavor", and silently labelling 94% of the corpus flavourless would teach source provenance rather than flavour -- the same failure as the original 97-bit fragment condvec, which was computed from the intact molecule and so contained the R-group being predicted.
 
-Shuffle test on `coconut-flavordb_v7` (25 epochs, logQ on):
+Shuffle test, 2026-08-31 -- VOID, and the corpus it ran on is deleted.
+The condvec then collapsed to a bare MW>350 bit (0.0% real flavour
+measured before deletion), so its 'real condition' arm carried no
+flavour at all. Superseded by the 2026-09-01 three-seed rerun.
 
 ```
 no condition          H@1 0.3050

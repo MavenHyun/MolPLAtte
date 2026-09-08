@@ -19,7 +19,6 @@ PURPOSE = {
     "crossdocked": ("active", "CrossDocked2020 ligands from the processed pocket10 LMDB, ONE RECORD PER DISTINCT LIGAND (11,735 ligands behind 166,500 pocket-ligand pairs; mean 14.2x reuse, max 1,100). Pair-level records would multiply R-group counts by that factor and corrupt both the frequency prior and the logQ correction, so each record instead carries its full pocket key list in meta. Crystallographic artifacts (cryoprotectants, buffers, ions, detergents, nucleotide cofactors) are removed by CCD code: 4.0% of distinct ligands but 11.3% of pocket pairs, since artifacts are the promiscuous head. Substrate for the pocket-conditioning stage. Effective R-group vocabulary 1,478 -- HIGHER than coconut-flavordb-full's 889 despite 35x fewer records, so retrieval here is harder, not easier. See docs/POCKET_PREPROCESSING.md."),
     "coconut-flavordb-full":     ("active", "Both sources, unfiltered. The default pretraining corpus."),
     "coconut-flavordb-filtered": ("active", "Both sources, COCONUT restricted to the odorant physicochemical envelope (MW 108-290, logP 0.4-4.5, TPSA<=53) derived from the 2,141 FlavorDB compounds with a measured non-sweet sensory label, UNION every known-flavor compound. The envelope keeps 7.7% of COCONUT and raises known-flavor density from a 0.66% base rate to 4.00% -- 6.1x enriched -- at the cost of rejecting 45% of real odorants, which the union with known-flavor compounds repairs. (The union's own 5.98% density is partly circular and should not be quoted as the filter's enrichment.) See docs/coconut_filtering_rationale.pdf. Intended for pocket finetuning and flavor conditioning."),
-    "coconut-flavordb_v7":       ("superseded", "Same content as coconut-flavordb-full. Retained because the three-arm condvec shuffle test was run against it; deleting it orphans those results."),
         }
 
 def build_tag(meta):
@@ -118,7 +117,10 @@ def main():
              "provenance rather than flavour -- the same failure as the original 97-bit "
              "fragment condvec, which was computed from the intact molecule and so "
              "contained the R-group being predicted.\n")
-    L.append("Shuffle test on `coconut-flavordb_v7` (25 epochs, logQ on):\n")
+    L.append("Shuffle test, 2026-08-31 -- VOID, and the corpus it ran on is deleted.\n"
+             "The condvec then collapsed to a bare MW>350 bit (0.0% real flavour\n"
+             "measured before deletion), so its 'real condition' arm carried no\n"
+             "flavour at all. Superseded by the 2026-09-01 three-seed rerun.\n")
     L.append("```")
     L.append("no condition          H@1 0.3050")
     L.append("PERMUTED condition    H@1 0.3098   +1.6%  <- capacity effect")
