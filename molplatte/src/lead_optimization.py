@@ -32,6 +32,7 @@ from typing import Dict, List, Optional, Sequence
 
 import numpy as np
 import torch
+from rdkit import Chem
 
 from data_modules.base import collate_molplatte
 from data_modules.dataset import MolPLAtteSample
@@ -46,6 +47,8 @@ if str(PREP_SRC) not in __import__("sys").path:
 from molplatte_prep.condvec import FLAVOR_LABELS  # noqa: E402
 from molplatte_prep.decompose import decompose_molecule, wash  # noqa: E402
 from molplatte_prep.mol_features import mol_to_pyg  # noqa: E402
+from molplatte_prep.graph_ops import attach_rgroups  # noqa: E402
+from molplatte_prep.mol_features import pyg_to_mol  # noqa: E402
 from molplatte_prep.molpla_instance import build_instance  # noqa: E402
 from data_modules.rgroup_vocab import RGroupLibraryVocab  # noqa: E402
 
@@ -61,6 +64,11 @@ DECOMP_KWARGS = dict(
 )
 
 
+def _n_aromatic(smiles: str) -> int:
+    m = Chem.MolFromSmiles(smiles) if smiles else None
+    return sum(1 for a in m.GetAtoms() if a.GetIsAromatic()) if m else -1
+
+
 @dataclass
 class Suggestion:
     """One retrieved R-group for one slot of one core."""
@@ -71,10 +79,24 @@ class Suggestion:
     hash: str
     corpus_count: int
     is_novel: bool
+    #: SMILES of the molecule this R-group builds when attached to the core.
+    #: ``None`` when assembly was not requested, the checkpoint has no assembly
+    #: head, or the predicted joint chemistry does not sanitise.
+    product: Optional[str] = None
+    #: Why ``product`` is None, when it is.
+    product_error: str = ""
+    #: False when the product sanitises but lost aromatic atoms the parent had.
+    #: Reported separately because RDKit accepts a broken aromatic ring without
+    #: complaint -- "sanitises" and "chemically right" are different claims, and
+    #: an undertrained assembly head fails this while scoring 100% valid.
+    aromaticity_kept: Optional[bool] = None
 
     def __repr__(self) -> str:  # pragma: no cover - display only
         tag = " [novel]" if self.is_novel else ""
-        return f"#{self.rank} {self.smiles}  score={self.score:.4f}{tag}"
+        got = f"  -> {self.product}" if self.product else ""
+        if self.product and self.aromaticity_kept is False:
+            got += "  [aromaticity broken]"
+        return f"#{self.rank} {self.smiles}  score={self.score:.4f}{tag}{got}"
 
 
 @dataclass
@@ -99,6 +121,7 @@ class LeadOptimizer:
         self.popularity_coef = float(popularity_coef)
         self._library: Optional[torch.Tensor] = None
         self._log_prior: Optional[torch.Tensor] = None
+        self._assembly_untrained = False
         prov = getattr(vocab, "provenance", None) or {}
         self._novel = set(prov.get("novel_hashes") or [])
 
@@ -123,11 +146,22 @@ class LeadOptimizer:
         if missing:
             logger.warning("[LeadOptimizer] %d tensors missing from the checkpoint "
                            "and left at init: %s", len(missing), missing[:3])
+        # An assembly head at random init produces confident nonsense -- observed
+        # emitting hafnium atoms into aromatic rings -- so record that it is
+        # untrained and refuse to use it, rather than logging a warning nobody
+        # reads and returning molecules anyway.
+        untrained = any("assembly_head" in k for k in missing)
         # The SAME wrapper the training-time retrieval callback uses, so a
         # number produced here and a Hit@K reported during validation are
         # scored against identical row order and identical priors.
         vocab = RGroupLibraryVocab(vocab_path)
-        return cls(model, vocab, device=device)
+        opt = cls(model, vocab, device=device)
+        opt._assembly_untrained = untrained
+        if untrained:
+            logger.warning("[LeadOptimizer] the checkpoint has NO assembly-head "
+                           "weights; assembly is disabled. Retrain with "
+                           "assembly.enabled=true to build molecules.")
+        return opt
 
     # -- library -----------------------------------------------------------
     @torch.no_grad()
@@ -201,8 +235,15 @@ class LeadOptimizer:
     @torch.no_grad()
     def optimize(self, smiles: str, *, flavor: Optional[Sequence[str]] = None,
                  pocket: Optional[np.ndarray] = None, top_k: int = 10,
-                 max_decompositions: int = 4) -> List[SlotResult]:
-        """Retrieve replacement R-groups for every slot of *smiles*."""
+                 max_decompositions: int = 4,
+                 assemble: bool = False) -> List[SlotResult]:
+        """Retrieve replacement R-groups for every slot of *smiles*.
+
+        ``assemble=True`` additionally builds each suggested molecule, which
+        needs a checkpoint trained with ``assembly.enabled=true``. Without one
+        every suggestion comes back with ``product=None`` and a stated reason
+        rather than silently unassembled.
+        """
         if self._library is None:
             self.build_library()
 
@@ -264,27 +305,156 @@ class LeadOptimizer:
                     scores = scores + self.popularity_coef * self._log_prior
                 top = scores[0].topk(min(top_k, scores.shape[1]))
 
+                sugg = [
+                    Suggestion(
+                        rank=r + 1,
+                        score=float(sc),
+                        smiles=self._smiles_of_row(int(i)),
+                        hash=self.vocab.hashes[int(i)],
+                        corpus_count=int(self.vocab.counts[int(i)])
+                        if hasattr(self.vocab, "counts") else 0,
+                        is_novel=self.vocab.hashes[int(i)] in self._novel,
+                    )
+                    for r, (sc, i) in enumerate(zip(top.values, top.indices))
+                ]
+
+                if assemble:
+                    # The template is instance.P: the core with this joint
+                    # masked. joint_linker_ids is 1:1 with the detached
+                    # R-groups, and exactly one is detached here.
+                    lid = int(instance.joint_linker_ids[0])
+                    for r, (_sc, i) in enumerate(zip(top.values, top.indices)):
+                        graph = self._graph_of_row(int(i), lid)
+                        if graph is None:
+                            sugg[r].product_error = "library row has no graph"
+                            continue
+                        prod, err = self.assemble(instance.P, graph, lid)
+                        sugg[r].product = prod
+                        sugg[r].product_error = err
+                        if prod:
+                            sugg[r].aromaticity_kept = (
+                                _n_aromatic(prod) >= _n_aromatic(smiles))
+
                 results.append(SlotResult(
                     decomp_index=d_idx,
                     slot_index=slot,
                     core_smiles=getattr(decomp, "core_smiles", "") or "",
                     original_rgroup=self._rgroup_smiles_of(mol, decomp, slot),
-                    suggestions=[
-                        Suggestion(
-                            rank=r + 1,
-                            score=float(s),
-                            smiles=self._smiles_of_row(int(i)),
-                            hash=self.vocab.hashes[int(i)],
-                            corpus_count=int(self.vocab.counts[int(i)])
-                            if hasattr(self.vocab, "counts") else 0,
-                            is_novel=self.vocab.hashes[int(i)] in self._novel,
-                        )
-                        for r, (s, i) in enumerate(zip(top.values, top.indices))
-                    ],
+                    suggestions=sugg,
                 ))
         return results
 
+    # -- assembly ----------------------------------------------------------
+    @property
+    def has_assembly_head(self) -> bool:
+        """True only when the head exists AND carries trained weights."""
+        return ("assembly_head" in self.model.nnet
+                and not self._assembly_untrained)
+
+    @torch.no_grad()
+    def assemble(self, template, rgroup_graph, linker_id: int) -> tuple:
+        """Attach *rgroup_graph* to *template*, predicting the joint chemistry.
+
+        Retrieval says WHICH R-group belongs at a joint. It cannot say HOW to
+        attach it: the joint is masked, so the shared linker atom's identity and
+        the bond that reforms were both replaced by MASK sentinels. That masking
+        is deliberate -- it frees retrieval from having to match the original
+        linker -- but it means a retrieved R-group cannot be bonded on without
+        the assembly head predicting what the mask destroyed.
+
+        The template's stored ``linker_metas`` hold the ORIGINAL joint, which is
+        the wrong answer for any R-group other than the one that was there. So
+        the predicted attributes are written over them.
+
+        Returns ``(smiles, error)``; exactly one is non-empty. The four
+        attributes are predicted by independent classifiers and can disagree --
+        a carbon with charge +2 and five hydrogens is representable in the
+        feature space and not in chemistry -- so a sanitisation failure is an
+        ordinary outcome, reported rather than raised.
+        """
+        if "assembly_head" not in self.model.nnet:
+            return None, "model was built without an assembly head"
+        if self._assembly_untrained:
+            return None, ("assembly head is at random init -- this checkpoint "
+                          "was trained with assembly.enabled=false")
+
+        import copy
+
+        from torch_geometric.data import Batch
+
+        head = self.model.nnet["assembly_head"]
+        enc = self.model.nnet["graph_encoder"]
+
+        tpl = copy.deepcopy(template)
+        rg = copy.deepcopy(rgroup_graph)
+        try:
+            core_at = int((tpl.linker_id == linker_id).nonzero()[0].item())
+            rg_at = int((rg.linker_id == linker_id).nonzero()[0].item()) \
+                if hasattr(rg, "linker_id") and (rg.linker_id == linker_id).any() \
+                else int(rg.is_linker.nonzero()[0].item())
+        except (IndexError, AttributeError) as exc:
+            return None, f"no joint {linker_id} on template or R-group: {exc}"
+
+        # One encoder pass over both views, exactly as training does.
+        batch = Batch.from_data_list([tpl, rg]).to(self.device)
+        out = enc(batch)
+        H = out.node_embeddings
+        offset = int((batch.batch == 0).sum().item())
+        fused = head._fuse(H[core_at].unsqueeze(0), H[offset + rg_at].unsqueeze(0))
+
+        atom_pred = {a: int(h(fused).argmax(-1).item()) for a, h in head.node_heads.items()}
+        bond_pred = {a: int(h(fused).argmax(-1).item()) for a, h in head.edge_heads.items()}
+
+        metas = dict(getattr(tpl, "linker_metas", {}) or {})
+        meta = dict(metas.get(linker_id) or {})
+        atom_feats = dict(meta.get("atom_features") or {})
+        atom_feats.update(atom_pred)          # predicted attrs win over the original
+        bond_feats = dict(meta.get("cut_bond_features") or {})
+        bond_feats.update(bond_pred)
+        meta["atom_features"] = atom_feats
+        meta["cut_bond_features"] = bond_feats
+        metas[linker_id] = meta
+        tpl.linker_metas = metas
+
+        try:
+            merged = attach_rgroups(tpl, [rg], linker_ids=[linker_id],
+                                    restore_features=True,
+                                    bond_features={linker_id: bond_feats})
+        except Exception as exc:  # noqa: BLE001
+            return None, f"attach failed: {type(exc).__name__}: {exc}"
+        try:
+            mol = pyg_to_mol(merged, sanitize=True)
+            smi = Chem.MolToSmiles(mol)
+        except Exception as exc:  # noqa: BLE001
+            return None, f"unsanitisable: {type(exc).__name__}"
+        return (smi, "") if smi else (None, "empty SMILES")
+
     # -- display helpers ---------------------------------------------------
+    def _graph_of_row(self, row: int, linker_id: int):
+        """Library R-group graph, with its linker relabelled to this joint.
+
+        Vocabulary graphs are stored with whatever linker_id they carried in
+        their source molecule. attach_rgroups pairs template joint to R-group
+        clone BY id, so a mismatched id silently finds no partner.
+        """
+        import copy
+
+        graphs = getattr(self.vocab, "_graphs", None)
+        if not graphs or row >= len(graphs) or graphs[row] is None:
+            return None
+        g = copy.deepcopy(graphs[row])
+        if not hasattr(g, "is_linker"):
+            return None
+        idx = g.is_linker.nonzero(as_tuple=False).flatten()
+        if idx.numel() == 0:
+            return None
+        if not hasattr(g, "linker_id") or g.linker_id is None:
+            g.linker_id = torch.zeros(g.num_nodes, dtype=torch.long)
+        g.linker_id = g.linker_id.clone()
+        g.linker_id[:] = 0
+        g.linker_id[idx[0]] = linker_id
+        return g
+
     def _smiles_of_row(self, row: int) -> str:
         smiles = getattr(self.vocab, "smiles", None)
         if smiles and row < len(smiles) and smiles[row]:
@@ -293,8 +463,6 @@ class LeadOptimizer:
 
     @staticmethod
     def _rgroup_smiles_of(mol, decomp, slot: int) -> str:
-        from rdkit import Chem
-
         try:
             atoms = list(decomp.rgroups[slot].rgroup_atoms)
             return Chem.MolFragmentToSmiles(mol, atomsToUse=atoms)

@@ -466,6 +466,51 @@ class TestReadersRunToExhaustion:
             "the logging block belongs to read_crossdocked")
 
 
+class TestAssemblyRoundTrip:
+    """Detaching an R-group and reattaching it must return the parent molecule.
+
+    This is the ground-truth control for the assembly path: it uses the STORED
+    joint chemistry rather than a prediction, so any loss here is the plumbing
+    itself -- feature restoration, linker-id pairing, edge reindexing -- and not
+    the head. Measured 6/6 exact when this was written.
+
+    Without it, an assembly bug is invisible: attach_rgroups returns a graph of
+    the right size either way, and a wrong bond order or a dropped hydrogen
+    still yields a molecule that sanitises.
+    """
+
+    SMILES = ["COc1cc(C=O)ccc1O", "CC(=O)OC1=CC=CC=C1C(=O)O",
+              "CC(C)=CCCC(C)=CC=O", "CCCCCC=O", "c1ccc(cc1)C=O",
+              "CC(=O)Nc1ccc(O)cc1"]
+
+    def test_detach_then_reattach_is_identity(self):
+        from molplatte_prep.decompose import decompose_molecule, wash
+        from molplatte_prep.graph_ops import attach_rgroups
+        from molplatte_prep.mol_features import mol_to_pyg, pyg_to_mol
+        from molplatte_prep.molpla_instance import build_instance
+
+        KW = dict(method="naveja_recap", ratio=1.0 / 3.0, include_ring=True,
+                  max_cores=4, min_rgroup_atoms=2)
+        checked = 0
+        for smi in self.SMILES:
+            mol = wash(smi, remove_stereo=False, neutralise=False)
+            _, decs = decompose_molecule(mol, do_wash=False, **KW)
+            if not decs:
+                continue
+            dec = decs[0]
+            k = len(dec.rgroups)
+            inst = build_instance(mol_to_pyg(mol), dec, [i != 0 for i in range(k)],
+                                  mol_id="rt", store_orig=True, compute_hashes=False)
+            lid = int(inst.joint_linker_ids[0])
+            R = inst.R[0] if isinstance(inst.R, (list, tuple)) else inst.R
+            merged = attach_rgroups(inst.P, [R], linker_ids=[lid],
+                                    restore_features=True)
+            got = Chem.MolToSmiles(pyg_to_mol(merged, sanitize=True))
+            assert got == Chem.MolToSmiles(mol), f"{smi}: round-trip gave {got}"
+            checked += 1
+        assert checked >= 5, f"only {checked} molecules decomposed; fixture too weak"
+
+
 # ---------------------------------------------------------------- hashing
 class TestHashVersionPinned:
     def test_hash_version_matches_built_corpora(self):
