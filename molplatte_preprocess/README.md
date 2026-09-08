@@ -73,7 +73,11 @@ molplatte_preprocess/
 │   ├── anchored_from_partition.py the bridge: flat partition → anchored stars
 │   ├── molpla_instance.py         MolPlaInstance, build_instance, sample/enumerate
 │   │                              islinked, decomposition_record
-│   ├── condvec.py                 NeutralCondVec (97-dim) / PocketCondVec (stub)
+│   ├── condvec.py                 FlavorCondVec (24 exogenous bits) /
+│   │                              StoredPocketCondVec / TwoPartCondVec /
+│   │                              NeutralCondVec (97-dim, the LEAKY original)
+│   ├── pocket_ligands.py          CCD blocklist, ligand validation, 10 A pockets,
+│   │                              polymer-vs-ligand residue discrimination
 │   ├── mol_features.py            RDKit Mol ↔ PyG with MolPLA's exact feature schema
 │   ├── graph_ops.py               detach_rgroups_multi / attach_rgroups (anchored)
 │   ├── fragment_types.py          FragmentPartition / FragmentInfo / CutBond
@@ -83,8 +87,10 @@ molplatte_preprocess/
 │   ├── lmdb_store.py              LMDB corpus reader/writer + dehydrate/hydrate
 │   ├── preprocess/writer.py       per-mol .pt layout, atomic __meta__/__manifest__
 │   └── vendor/                    vendored MacFrag and Synt-On — read-only
+├── tests/                         54 regression guards for silent failures
 ├── docs/corpus_format.md          on-disk record format + verification recipe
-├── generate_eda_report.py         corpus EDA -> docs/molplatte_corpus_eda.pdf
+├── docs/POCKET_PREPROCESSING.md   structural sources -> pocket-conditioned corpus
+├── generate_eda_report.py         flavour-corpus EDA -> docs/eda_<corpus>.pdf
 ├── pyproject.toml
 ├── requirements.txt
 └── .gitignore
