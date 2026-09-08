@@ -35,11 +35,13 @@ COCONUT); the flag exists precisely because that trade-off is a judgement call.
 from __future__ import annotations
 
 import csv
+import gzip
 import io
 import logging
 import json
 import os
 import pickle
+import random
 import sys
 import zipfile
 from dataclasses import dataclass, field
@@ -57,6 +59,7 @@ __all__ = [
     "read_coconut",
     "read_crossdocked",
     "read_tastepocket",
+    "read_zinc",
     "read_source",
     "SOURCES",
 ]
@@ -554,11 +557,159 @@ def read_tastepocket(
                 return
 
 
+#: ZINC encodes chemistry in its directory names: the first letter of a tranche
+#: is a molecular-weight bin, the second a logP bin. Measured on this download:
+#: B*~233 Da, C*~283, D*~315, E*~339, F*~363, G*~388, H*~414, I*~437, J*~475;
+#: logP runs *A~-2.5 to *J~+3.4.
+ZINC_TRANCHE_MW = {"B": 233, "C": 283, "D": 315, "E": 339, "F": 363,
+                   "G": 388, "H": 414, "I": 437, "J": 475}
+
+#: Measured over a 470k-molecule sample of this archive. Used only to size the
+#: per-tranche quota before reading; the actual draw counts real molecules.
+_ZINC_BYTES_PER_MOL = 693.0
+
+
+def _zinc_quotas(tranches: Dict[str, int], total: int) -> Dict[str, int]:
+    """Split *total* equally across tranches, capping those that cannot fill it.
+
+    An equal split is the point: ZINC's natural distribution puts 52% of its
+    mass in the D and E rows around 315-339 Da, and only 2.8% in the B row at
+    233 Da -- the row closest to flavour chemistry. Sampling proportionally
+    would reproduce that skew and pretrain on a narrow drug-like band.
+
+    12 of the 90 tranches hold less than an equal share (``FD`` is 492 KB in
+    total), so their shortfall is redistributed over the tranches that still
+    have room, repeatedly, until either the target is met or every tranche is
+    at capacity. Without that, an equal split silently returns fewer molecules
+    than asked for.
+    """
+    quota = {t: 0 for t in tranches}
+    remaining = dict(tranches)
+    want = total
+    while want > 0:
+        open_t = [t for t in remaining if remaining[t] > 0]
+        if not open_t:
+            break
+        share = max(want // len(open_t), 1)
+        moved = 0
+        for t in open_t:
+            take = min(share, remaining[t], want - moved)
+            if take <= 0:
+                continue
+            quota[t] += take
+            remaining[t] -= take
+            moved += take
+            if moved >= want:
+                break
+        if moved == 0:
+            break
+        want -= moved
+    return quota
+
+
+def read_zinc(
+    path: str | Path,
+    *,
+    size_filter: Optional[SizeFilter] = None,
+    limit: Optional[int] = None,
+    total: int = 10_000_000,
+    seed: int = 20260908,
+    **_: object,
+) -> Iterator[SourceRecord]:
+    """Stream a tranche-balanced sample of ZINC2020 3D SDF shards.
+
+    ``total`` molecules are drawn EQUALLY across the 90 tranches, with the
+    shortfall from tranches too small to fill their share redistributed to
+    those that can (see :func:`_zinc_quotas`). Within a tranche, shards are
+    shuffled and read until the quota is met, so the draw is not biased toward
+    whichever shards happen to sort first.
+
+    No condition vector is available or implied: ZINC has neither flavour
+    annotations nor pockets. Every record therefore carries an empty ``meta``
+    beyond provenance, and the corpus should be built with
+    ``--condvec-mode neutral`` or a zeroed flavour vector.
+
+    ``limit`` is an absolute cap applied after quotas, for smoke tests.
+    """
+    root = Path(path)
+    shards_by_tranche: Dict[str, List[Path]] = {}
+    for shard in root.rglob("*.sdf.gz"):
+        if shard.stat().st_size <= 0:
+            continue
+        tranche = shard.relative_to(root).parts[0]
+        shards_by_tranche.setdefault(tranche, []).append(shard)
+    if not shards_by_tranche:
+        raise FileNotFoundError(f"no .sdf.gz shards under {root}")
+
+    capacity = {
+        t: int(sum(s.stat().st_size for s in sh) / _ZINC_BYTES_PER_MOL)
+        for t, sh in shards_by_tranche.items()
+    }
+    quotas = _zinc_quotas(capacity, total)
+    logging.info(
+        "[zinc] %d tranches, ~%.0fM available, drawing %s equally "
+        "(%d tranches capped below their share)",
+        len(quotas), sum(capacity.values()) / 1e6, f"{total:,}",
+        sum(1 for t in quotas if quotas[t] >= capacity[t] and capacity[t] > 0),
+    )
+
+    rng = random.Random(seed)
+    sf = size_filter or SizeFilter()
+    emitted = 0
+    for tranche in sorted(shards_by_tranche):
+        want = quotas.get(tranche, 0)
+        if want <= 0:
+            continue
+        shards = list(shards_by_tranche[tranche])
+        rng.shuffle(shards)
+        got = 0
+        for shard in shards:
+            if got >= want:
+                break
+            try:
+                with gzip.open(shard, "rb") as fh:
+                    supplier = Chem.ForwardSDMolSupplier(
+                        fh, removeHs=True, sanitize=True)
+                    for mol in supplier:
+                        if got >= want:
+                            break
+                        if mol is None or not sf.accepts(mol):
+                            continue
+                        try:
+                            smiles = Chem.MolToSmiles(mol)
+                        except Exception:  # noqa: BLE001
+                            continue
+                        if not smiles:
+                            continue
+                        zid = (mol.GetProp("_Name").strip()
+                               if mol.HasProp("_Name") else f"ZINC{emitted}")
+                        yield SourceRecord(zid, smiles, "zinc",
+                                           {"tranche": tranche,
+                                            "tranche_mw_bin": tranche[0],
+                                            "tranche_logp_bin": tranche[1:],
+                                            "shard": shard.name})
+                        got += 1
+                        emitted += 1
+                        if limit is not None and emitted >= limit:
+                            return
+            except Exception as exc:  # noqa: BLE001
+                # One corrupt shard must not end a 10M-molecule draw.
+                logging.warning("[zinc] skipping %s: %s", shard.name, exc)
+                continue
+        if got < want:
+            logging.warning("[zinc] tranche %s yielded %s of %s requested",
+                            tranche, f"{got:,}", f"{want:,}")
+
+
 SOURCES: Dict[str, Tuple[object, str]] = {
     "flavordb": (read_flavordb, os.path.expanduser("~/datasets/flavordb")),
     "coconut": (
         read_coconut,
         os.path.expanduser("~/datasets/coconut/coconut_sdf_3d-08-2026.sdf"),
+    ),
+    "zinc": (
+        read_zinc,
+        os.path.expanduser("~/datasets/zinc2020/raw"),
     ),
     "tastepocket": (
         read_tastepocket,

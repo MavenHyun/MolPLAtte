@@ -511,6 +511,60 @@ class TestAssemblyRoundTrip:
         assert checked >= 5, f"only {checked} molecules decomposed; fixture too weak"
 
 
+class TestZincTrancheSampling:
+    """ZINC's tranches are chemistry, not just directories.
+
+    The first letter of a tranche is a molecular-weight bin (B~233 Da to
+    J~475 Da), the second a logP bin. ZINC's natural distribution puts 52% of
+    its mass in the D and E rows at 315-339 Da and only 2.8% in the B row -- the
+    row closest to flavour chemistry. A proportional draw therefore pretrains on
+    a narrow drug-like band while looking like a large diverse sample.
+    """
+
+    def test_equal_split_hits_the_target_exactly(self):
+        from molplatte_prep.readers import _zinc_quotas
+
+        caps = {"BIG1": 50_000_000, "BIG2": 50_000_000, "SMALL": 1_000, "TINY": 10}
+        q = _zinc_quotas(caps, 1_000_000)
+        assert sum(q.values()) == 1_000_000, "shortfall was not redistributed"
+
+    def test_no_tranche_is_drawn_beyond_capacity(self):
+        from molplatte_prep.readers import _zinc_quotas
+
+        caps = {"A": 500, "B": 10_000_000, "C": 12}
+        q = _zinc_quotas(caps, 100_000)
+        for t, n in q.items():
+            assert n <= caps[t], f"{t}: asked {n} of {caps[t]} available"
+
+    def test_terminates_when_supply_is_short(self):
+        """Demanding more than exists must return what exists, not loop."""
+        from molplatte_prep.readers import _zinc_quotas
+
+        q = _zinc_quotas({"A": 100, "B": 100}, 1_000_000)
+        assert sum(q.values()) == 200
+
+
+class TestOdorlessIsNotFabricatedForZinc:
+    """`odorless` is a volatility claim and must not be invented from MW.
+
+    The MW>350 rule is meaningful for food compounds and natural products, where
+    "is this an odorant?" is the operative question. On a virtual screening
+    library it is not: nobody assessed volatility, so asserting `odorless`
+    manufactures a measurement. Measured before the flag existed: 87% of a ZINC
+    sample was labelled odorless on molecular weight alone.
+    """
+
+    def test_infinite_cutoff_yields_unknown_not_odorless(self):
+        heavy = {"inchikey": "NOT-IN-ANY-TABLE", "mol_id": "", "mw": 480.0}
+        assert bits(FlavorCondVec().encode(None, heavy)) == {"odorless"}
+        suppressed = FlavorCondVec(mw_cutoff=float("inf"))
+        assert bits(suppressed.encode(None, heavy)) == {"unknown"}
+
+    def test_suppression_does_not_touch_real_labels(self):
+        enc = FlavorCondVec(measured={"K": ["sweet"]}, mw_cutoff=float("inf"))
+        assert bits(enc.encode(None, {"inchikey": "K", "mw": 900.0})) == {"sweet"}
+
+
 # ---------------------------------------------------------------- hashing
 class TestHashVersionPinned:
     def test_hash_version_matches_built_corpora(self):

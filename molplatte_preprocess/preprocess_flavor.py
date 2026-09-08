@@ -77,7 +77,8 @@ RDLogger.DisableLog("rdApp.*")
 
 from molplatte_prep import __version__
 from molplatte_prep.anchored_from_partition import partitions_to_decompositions
-from molplatte_prep.condvec import CONDVEC_MODES, get_condvec_encoder
+from molplatte_prep.condvec import (CONDVEC_MODES, ODORLESS_MW_CUTOFF,
+                                    get_condvec_encoder)
 from molplatte_prep.decompose import Decomposition, wash
 from molplatte_prep.decomposers import (
     family_of,
@@ -138,7 +139,14 @@ def _build_condvec(config):
         PocketCondVec, TwoPartCondVec, FLAVOR_LABELS)
     meas, mined = load_flavor_tables(config.get("flavor_measured"),
                                      config.get("flavor_mined"))
-    fl = FlavorCondVec(measured=meas, mined=mined)
+    # The MW>350 `odorless` rule is a claim about volatility, and it is only
+    # meaningful where volatility is the operative question -- food compounds and
+    # natural products. On a virtual screening library nobody asked whether the
+    # molecule is an odorant, so asserting `odorless` fabricates a measurement.
+    # Suppressing it leaves `unknown`, which is what we actually know.
+    mw_cutoff = float("inf") if config.get("no_physics_odorless") \
+        else config.get("odorless_mw_cutoff") or ODORLESS_MW_CUTOFF
+    fl = FlavorCondVec(measured=meas, mined=mined, mw_cutoff=mw_cutoff)
     _assert_flavor_tables_reachable(fl, meas, mined)
     if mode == "flavor":
         return fl
@@ -390,7 +398,8 @@ def _source_items(args, size_filter: SizeFilter, skip: set) -> Iterator[tuple]:
     emitted = 0
     paths = {"flavordb": args.flavordb_path, "coconut": args.coconut_path,
              "crossdocked": args.crossdocked_path,
-             "tastepocket": args.tastepocket_path}
+             "tastepocket": args.tastepocket_path,
+             "zinc": args.zinc_path}
     # Optional id whitelist. FlavorDB records are exempt: they are labelled by
     # construction, so the filter exists to thin the COCONUT half.
     include = None
@@ -404,6 +413,8 @@ def _source_items(args, size_filter: SizeFilter, skip: set) -> Iterator[tuple]:
         if source == "crossdocked":
             kw = {"drug_like": not args.keep_artifact_ligands,
                   "keep_cofactors": args.keep_cofactors}
+        elif source == "zinc":
+            kw = {"total": args.zinc_total, "seed": args.sample_seed}
         for record in read_source(
             source, paths.get(source), size_filter=size_filter, **kw
         ):
@@ -442,7 +453,7 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     source.add_argument(
         "--source",
         nargs="+",
-        choices=("flavordb", "coconut", "crossdocked", "tastepocket"),
+        choices=("flavordb", "coconut", "crossdocked", "tastepocket", "zinc"),
         required=True,
         help="one or more sources; several are merged into a single corpus",
     )
@@ -457,6 +468,13 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
                              "only; other artifacts stay filtered.")
     source.add_argument("--crossdocked-path", default=None,
                         help="processed pocket10 LMDB; default is the one in ~/datasets")
+    source.add_argument("--zinc-path", default=None,
+                        help="root of the ZINC2020 3D SDF shards; default ~/datasets")
+    source.add_argument("--zinc-total", type=int, default=10_000_000,
+                        help="molecules to draw, split EQUALLY across the 90 "
+                             "tranches with capped redistribution. ZINC's natural "
+                             "distribution puts 52%% of its mass at 315-339 Da, so a "
+                             "proportional draw would pretrain on a narrow band.")
     source.add_argument("--tastepocket-path", default=None,
                         help="dataset.jsonl from build_tastepocket_dataset.py; "
                              "default is the one in ~/preprocessed/molplatte")
@@ -517,6 +535,11 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         "formal_charge to one class.",
     )
     decomp.add_argument("--condvec-mode", choices=CONDVEC_MODES, default="neutral")
+    decomp.add_argument("--no-physics-odorless", action="store_true",
+                        help="never infer `odorless` from MW. Correct for sources "
+                             "where volatility was never assessed (ZINC): the rule "
+                             "would otherwise label 87%% of it odorless on molecular "
+                             "weight alone.")
     decomp.add_argument("--pocket-source", choices=("zeros", "stored"), default="zeros",
                         help="'stored' reads the pocket half from each record's "
                              "meta (written by the source reader); 'zeros' leaves "
@@ -568,6 +591,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     size_filter = SizeFilter(args.min_heavy_atoms, args.max_heavy_atoms)
     method_kwargs = _build_method_kwargs(args)
     _cv_cfg = {"condvec_mode": args.condvec_mode,
+               "no_physics_odorless": args.no_physics_odorless,
                "pocket_source": args.pocket_source,
                "flavor_measured": args.flavor_measured,
                "flavor_mined": args.flavor_mined,
@@ -600,6 +624,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         "keep_stereo": args.keep_stereo,
         "neutralise": args.neutralise,
         "condvec_mode": args.condvec_mode,
+        "no_physics_odorless": args.no_physics_odorless,
         "pocket_source": args.pocket_source,
         "flavor_measured": args.flavor_measured,
         "flavor_mined": args.flavor_mined,
@@ -615,7 +640,8 @@ def main(argv: Optional[List[str]] = None) -> int:
             k: v for k, v in
             [("flavordb", args.flavordb_path), ("coconut", args.coconut_path),
              ("crossdocked", args.crossdocked_path),
-             ("tastepocket", args.tastepocket_path)]
+             ("tastepocket", args.tastepocket_path),
+             ("zinc", args.zinc_path)]
             if k in args.source
         } or "<defaults>"),
         ("dedup", not args.no_dedup),
@@ -721,6 +747,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         "neutralise": args.neutralise,
         "size_filter": size_filter.as_dict(),
         "condvec_mode": args.condvec_mode,
+        "no_physics_odorless": args.no_physics_odorless,
         "pocket_source": args.pocket_source,
         "flavor_measured": args.flavor_measured,
         "flavor_mined": args.flavor_mined,
