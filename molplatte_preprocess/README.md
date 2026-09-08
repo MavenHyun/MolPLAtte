@@ -22,7 +22,7 @@ happens in the training repo, not here — see
 | **COCONUT** (`coconut_sdf_3d-08-2026.sdf`, 2.3 GB) | 737,343 | **489,395** | `CNP…` | 3D molblocks and nothing else |
 
 Two things about these sources drive the reader code
-(`molplatte_prep/readers.py`):
+(`src/molplatte_prep/readers.py`):
 
 * **FlavorDB is read from the CSVs, not the SDFs.** `flavordb_3d.sdf` carries no
   SMILES at all and covers only 70.3% of the set. `properties.csv` has isomeric
@@ -56,7 +56,7 @@ the flag exists precisely because that trade-off is a judgement call.
 molplatte_preprocess/
 ├── preprocess_flavor.py           CLI driver: source → per-mol .pt corpus
 ├── scripts/build_all_corpora.sh   batch build of every (source, method) corpus
-├── molplatte_prep/
+├── src/molplatte_prep/
 │   ├── __init__.py                public surface (re-exports the whole API)
 │   ├── readers.py                 FlavorDB / COCONUT streaming readers, SizeFilter
 │   ├── decompose.py               wash(), Naveja putative cores, ring-aware fallback,
@@ -109,7 +109,7 @@ atom. Two families feed that shape, and the registry
 
 | `--method` | what it does |
 |---|---|
-| `naveja_recap` | RDKit RECAP children kept when they hold ≥ `ratio · nHA(M)` (Naveja 2019 core-size filter, default 2/3), plus a ring-aware fallback over non-ring single bonds. **MolPLA's own method.** |
+| `naveja_recap` | RDKit RECAP children kept when they hold ≥ `ratio · nHA(M)` (Naveja 2019 core-size filter), plus a ring-aware fallback over non-ring single bonds. MolPLA's own method, and **what every corpus on disk uses**, at `ratio=1/3`. |
 | `bemis_murcko` | One decomposition per molecule: core = Murcko scaffold, R-groups = the side chains hanging off it. |
 
 **Multi-cut fragment** — return `List[FragmentPartition]`, re-framed by
@@ -117,7 +117,7 @@ atom. Two families feed that shape, and the registry
 
 | `--method` | what it does |
 |---|---|
-| `macfrag` | MacFrag (Diao 2023): BRICS-like environments + igraph block merging. **The default.** |
+| `macfrag` | MacFrag (Diao 2023): BRICS-like environments + igraph block merging. |
 | `synton` | Synt-On: curated reaction-based SMARTS disconnections. |
 
 ### Measured comparison — 400 FlavorDB molecules, heavy atoms in [5, 50]
@@ -165,7 +165,8 @@ MolDAM_prep measured on ZINC — **99.42% single-R-group at ratio 2/3**, and eve
 ratio 1/2 only reaching 0.83% multi-R-group — after a 5.9-hour rebuild spent
 discovering it. Two independent chemical spaces, same failure.
 
-Hence the default is `macfrag` re-framed through the fragment tree: 3.34
+That reasoning made `macfrag` the original default, re-framed through the
+fragment tree: 3.34
 R-groups per core with **89.71% at k ≥ 2**, at a core size that matches what
 MolPLA trained on. `naveja_recap` stays in the registry as the paper-faithful
 baseline, not as a recommendation.
@@ -200,7 +201,7 @@ MolPLA conditions R-group retrieval on a binary functional-group vector of the
 *target* R-group. The paper says `c_R ∈ [0,1]^87`; the released code allocates 88
 and fills it from `thermo.functional_groups`. `thermo` is not a dependency here,
 and its 88 checks are bulk-thermodynamic classes rather than flavor chemistry, so
-`molplatte_prep/condvec.py` defines its own:
+`src/molplatte_prep/condvec.py` defines its own:
 
 * `--condvec-mode neutral` → **`NeutralCondVec`, 97 binary bits**: 85 RDKit
   `Chem.Fragments.fr_*` counters plus 12 SMARTS patterns central to flavor and
@@ -422,11 +423,11 @@ Not yet built:
   Reference implementation: [github.com/dmis-lab/MolPLA](https://github.com/dmis-lab/MolPLA).
 * Diao, Y. *et al.* **MacFrag: segmenting large-scale molecules to obtain diverse
   fragments with high qualities.** *Bioinformatics* **39**(1), btad012 (2023).
-  Vendored at `molplatte_prep/vendor/macfrag.py`; original:
+  Vendored at `src/molplatte_prep/vendor/macfrag.py`; original:
   [github.com/yydiao1025/MacFrag](https://github.com/yydiao1025/MacFrag).
 * Chuiko, Y. *et al.* **Synt-On:** retrosynthetic SMARTS-rule fragmentation of
   synthesizable chemical space. Vendored at
-  `molplatte_prep/vendor/synton/`.
+  `src/molplatte_prep/vendor/synton/`.
 * Naveja, J. J. *et al.* **A general approach for retrosynthetic molecular core
   analysis.** *J. Cheminform.* **11**, 61–69 (2019). — the core-size `ratio`
   filter behind `naveja_recap`.
