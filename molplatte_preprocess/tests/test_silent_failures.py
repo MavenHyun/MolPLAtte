@@ -544,6 +544,53 @@ class TestZincTrancheSampling:
         assert sum(q.values()) == 200
 
 
+class TestCorpusIdsAreUnique:
+    """A corpus manifest indexes decompositions BY POSITION in `ids`.
+
+    Records are written one file per mol_id, so a repeated id means the later
+    write silently overwrote the earlier one -- while the manifest kept BOTH
+    entries, each with its own decomposition count. The dataset then indexes
+    decomposition k of a molecule that may have fewer than k.
+
+    Observed on a 10M ZINC draw before read_zinc deduplicated ids: 485,573
+    repeated ids, of which 23.5% recorded conflicting decomposition counts, and
+    9,873,383 claimed records against 9,325,378 files actually on disk. Nothing
+    raised: the dataset built, and eight probe items loaded fine.
+    """
+
+    CORPORA = Path.home() / "preprocessed" / "molplatte"
+
+    def _corpora(self):
+        return sorted(p for p in self.CORPORA.glob("*/naveja_recap/__meta__.json"))
+
+    def test_no_corpus_repeats_a_mol_id(self):
+        import json
+
+        found = self._corpora()
+        if not found:
+            pytest.skip("no built corpora on this machine")
+        for meta_path in found:
+            meta = json.loads(meta_path.read_text())
+            ids = meta["ids"]
+            dupes = len(ids) - len(set(ids))
+            assert dupes == 0, (
+                f"{meta_path.parent.parent.name}: {dupes:,} repeated ids -- "
+                "later writes overwrote earlier ones and the manifest still "
+                "indexes both")
+
+    def test_manifest_count_matches_the_id_list(self):
+        import json
+
+        found = self._corpora()
+        if not found:
+            pytest.skip("no built corpora on this machine")
+        for meta_path in found:
+            meta = json.loads(meta_path.read_text())
+            assert meta["n_records"] == len(meta["ids"]), (
+                f"{meta_path.parent.parent.name}: n_records "
+                f"{meta['n_records']:,} != {len(meta['ids']):,} ids")
+
+
 class TestOdorlessIsNotFabricatedForZinc:
     """`odorless` is a volatility claim and must not be invented from MW.
 

@@ -656,6 +656,15 @@ def read_zinc(
     rng = random.Random(seed)
     sf = size_filter or SizeFilter()
     emitted = 0
+    # ZINC assigns a compound to a tranche by protonation state, so the SAME
+    # ZINC id appears in several tranches as different charge variants. They are
+    # written to one path per mol_id, so without this they overwrite each other:
+    # a 10M draw produced 485,573 repeated ids, and the manifest then recorded
+    # conflicting decomposition counts for a single surviving file (23.5% of the
+    # duplicates disagreed). Keeping the variants instead would inflate the
+    # R-group frequency prior with the same compound counted several times --
+    # the same reason CrossDocked is deduplicated to ligands.
+    seen_ids: set = set()
     for tranche in sorted(shards_by_tranche):
         want = quotas.get(tranche, 0)
         if want <= 0:
@@ -683,6 +692,9 @@ def read_zinc(
                             continue
                         zid = (mol.GetProp("_Name").strip()
                                if mol.HasProp("_Name") else f"ZINC{emitted}")
+                        if zid in seen_ids:
+                            continue
+                        seen_ids.add(zid)
                         yield SourceRecord(zid, smiles, "zinc",
                                            {"tranche": tranche,
                                             "tranche_mw_bin": tranche[0],

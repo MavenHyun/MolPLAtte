@@ -23,6 +23,7 @@ A `HASH_VERSION` mismatch is enforced at load time: the stored `rgroup_hashes`, 
 | `crossdocked` | active | 10,689 | 9,435 | 1478 | 0.1 GB | `r333-m2-h4-flavor24v2` |
 | `flavordb-only` | active | 20,812 | 6,182 | 299 | 0.1 GB | `r333-m2-h4-flavor24v3` |
 | `tastepocket_corpus` | UNDOCUMENTED | 243 | 263 | 129 | 0.0 GB | `r333-m2-h4-two_part1304v3` |
+| `zinc-10m` | UNDOCUMENTED | 9,860,230 | 600,066 | 6939 | 54.3 GB | `r333-m2-h4-flavor24v3` |
 
 ## What each is for
 
@@ -47,6 +48,10 @@ CrossDocked2020 ligands from the processed pocket10 LMDB, ONE RECORD PER DISTINC
 FlavorDB alone. Every molecule carries a measured flavor label, so the condvec is dense. Small; use for conditioning experiments where label coverage matters more than scale.
 
 ### `tastepocket_corpus` — UNDOCUMENTED
+
+Not described in write_corpora_manifest.py. Either document it or delete it.
+
+### `zinc-10m` — UNDOCUMENTED
 
 Not described in write_corpora_manifest.py. Either document it or delete it.
 
