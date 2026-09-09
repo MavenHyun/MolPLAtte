@@ -50,6 +50,11 @@ jobs:
           # guard needs it. Without it the guard skipped silently on CI while
           # passing locally -- the guard would have been decoration.
           pip install pytorch_lightning
+          # preprocess_flavor -> molplatte_prep.preprocess.writer -> lmdb_store
+          # imports lmdb at module level, so importing _mol_context needs it.
+          # Reproduced by building a venv with exactly these packages: the
+          # dev machine has lmdb from an earlier install and never noticed.
+          pip install lmdb lz4 zstandard python-igraph
 
       - name: pytest
         run: python -m pytest molplatte_preprocess/tests -v --tb=short
