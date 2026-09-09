@@ -114,11 +114,25 @@ class LeadOptimizer:
     """Checkpoint + R-group library, loaded once, queried many times."""
 
     def __init__(self, model: MolPLAtte, vocab, device: str = "cuda",
-                 popularity_coef: float = 1.0) -> None:
+                 popularity_coef: float = 1.0,
+                 temperature: float = 0.1) -> None:
         self.model = model.to(device).eval()
         self.vocab = vocab
         self.device = device
         self.popularity_coef = float(popularity_coef)
+        # MUST match the R-group contrastive loss temperature (contrastive.py
+        # default 0.1). The corrected score is sim/tau + coef * log p(k), and
+        # tau sets the scale at which the two terms trade off. Omitting it --
+        # scoring sim + log p directly, as this did until 2026-09-09 -- leaves
+        # the similarity term ~10x too small to matter: measured on the shipped
+        # checkpoint, the model spanned 0.083 across candidates while log p
+        # spanned 1.6, so `optimize()` returned the frequency prior in corpus-
+        # count order no matter what flavor or pocket was supplied. Retrieval
+        # eval showed 13x lift over that same prior, so the signal was there
+        # and simply never reached inference.
+        if temperature <= 0:
+            raise ValueError(f"temperature must be positive, got {temperature}")
+        self.temperature = float(temperature)
         self._library: Optional[torch.Tensor] = None
         self._log_prior: Optional[torch.Tensor] = None
         self._assembly_untrained = False
@@ -128,7 +142,8 @@ class LeadOptimizer:
     # -- construction ------------------------------------------------------
     @classmethod
     def load(cls, checkpoint: str | Path, vocab_path: str | Path,
-             device: str = "cuda", **model_kwargs) -> "LeadOptimizer":
+             device: str = "cuda", popularity_coef: float = 1.0,
+             temperature: float = 0.1, **model_kwargs) -> "LeadOptimizer":
         """Load a checkpoint and its library.
 
         ``model_kwargs`` must reproduce the architecture the checkpoint was
@@ -155,7 +170,8 @@ class LeadOptimizer:
         # number produced here and a Hit@K reported during validation are
         # scored against identical row order and identical priors.
         vocab = RGroupLibraryVocab(vocab_path)
-        opt = cls(model, vocab, device=device)
+        opt = cls(model, vocab, device=device,
+                  popularity_coef=popularity_coef, temperature=temperature)
         opt._assembly_untrained = untrained
         if untrained:
             logger.warning("[LeadOptimizer] the checkpoint has NO assembly-head "
@@ -296,7 +312,7 @@ class LeadOptimizer:
                 query = out["query_projection"].float().cpu()
                 query = torch.nn.functional.normalize(query, dim=-1)
 
-                scores = query @ self._library.T
+                scores = (query @ self._library.T) / self.temperature
                 if self.popularity_coef:
                     # InfoNCE optimises PMI, log p(k|q) - log p(k), not the
                     # posterior. Adding log p(k) back is what makes the ranking
