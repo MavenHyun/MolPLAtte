@@ -488,6 +488,69 @@ class TestAssemblyRoundTrip:
               "CC(C)=CCCC(C)=CC=O", "CCCCCC=O", "c1ccc(cc1)C=O",
               "CC(=O)Nc1ccc(O)cc1"]
 
+    #: Molecules with a stereocentre AT the joint. Chirality is not an intrinsic
+    #: atom property: CHI_TETRAHEDRAL_CW/CCW is defined against the ORDER of the
+    #: atom's bonds. Detach rebuilds edge_index and attach appends the restored
+    #: bond last, so the tag round-trips byte-for-byte and denotes the MIRROR
+    #: IMAGE. Measured before the fix: 21 of 22 round-trip failures were
+    #: stereochemistry-only with connectivity intact -- and for a flavour project
+    #: that is not cosmetic, since carvone's enantiomers smell of spearmint and
+    #: caraway respectively.
+    CHIRAL = [
+        "C=C1C[C@H]2[C@H](C(=C)C)C[C@@H](O)[C@]2(C)CC1",
+        "C=C[C@](C)(O)CCC(C)=CCO",
+        "CC(=O)O[C@@H]1CC[C@H](C)CC1",
+    ]
+
+    def test_chirality_survives_the_joint(self):
+        from molplatte_prep.decompose import decompose_molecule, wash
+        from molplatte_prep.graph_ops import attach_rgroups
+        from molplatte_prep.mol_features import mol_to_pyg, pyg_to_mol
+        from molplatte_prep.molpla_instance import build_instance
+
+        KW = dict(method="naveja_recap", ratio=1.0 / 3.0, include_ring=True,
+                  max_cores=4, min_rgroup_atoms=2)
+        checked = 0
+        for smi in self.CHIRAL:
+            mol = wash(smi, remove_stereo=False, neutralise=False)
+            _, decs = decompose_molecule(mol, do_wash=False, **KW)
+            if not decs:
+                continue
+            dec = decs[0]
+            k = len(dec.rgroups)
+            inst = build_instance(mol_to_pyg(mol), dec, [i != 0 for i in range(k)],
+                                  mol_id="chi", store_orig=True, compute_hashes=False)
+            lid = int(inst.joint_linker_ids[0])
+            R = inst.R[0] if isinstance(inst.R, (list, tuple)) else inst.R
+            merged = attach_rgroups(inst.P, [R], linker_ids=[lid],
+                                    restore_features=True)
+            got = Chem.MolToSmiles(pyg_to_mol(merged, sanitize=True))
+            want = Chem.MolToSmiles(mol)
+            assert got == want, (
+                f"{smi}: stereochemistry lost at the joint\n"
+                f"  got  {got}\n  want {want}")
+            checked += 1
+        assert checked >= 2, f"only {checked} chiral fixtures decomposed"
+
+    def test_chirality_correction_runs_after_the_bond_exists(self):
+        """Ordering guard: the correction is a no-op if it runs too early.
+
+        It counts the joint's neighbours to decide whether the atom is a
+        stereocentre. Called during restore_features -- before the cut bond is
+        appended -- it sees one neighbour too few, declines to act, and looks
+        installed while doing nothing. That is exactly how the first version of
+        this fix scored identical to no fix at all.
+        """
+        import inspect
+
+        from molplatte_prep import graph_ops
+
+        src = inspect.getsource(graph_ops.attach_rgroups)
+        fix_at = src.index("_fix_chirality_for_bond_reorder")
+        bond_at = src.index("step B")
+        assert fix_at > bond_at, (
+            "the chirality correction must run AFTER the cut bond is restored")
+
     def test_detach_then_reattach_is_identity(self):
         from molplatte_prep.decompose import decompose_molecule, wash
         from molplatte_prep.graph_ops import attach_rgroups

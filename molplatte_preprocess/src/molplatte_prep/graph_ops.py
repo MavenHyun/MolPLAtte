@@ -86,6 +86,30 @@ def is_linker_atom(data: Data, idx: int) -> bool:
     return bool(data.is_linker[idx].item())
 
 
+def _cut_bond_rank(data: Data, atom: int, cut_e_idx: int) -> int:
+    """Position of the cut bond among *atom*'s bonds, in edge_index order.
+
+    Counts each undirected bond once, by first appearance, which is the order
+    pyg_to_mol will call AddBond in.
+    """
+    partner_of_cut = None
+    u, v = int(data.edge_index[0, cut_e_idx]), int(data.edge_index[1, cut_e_idx])
+    partner_of_cut = v if u == atom else u
+    seen, rank = set(), 0
+    for e in range(data.edge_index.size(1)):
+        a, b = int(data.edge_index[0, e]), int(data.edge_index[1, e])
+        if atom not in (a, b):
+            continue
+        other = b if a == atom else a
+        if other in seen:
+            continue
+        seen.add(other)
+        if other == partner_of_cut:
+            return rank
+        rank += 1
+    return rank
+
+
 def _atom_feature_snapshot(data: Data, idx: int) -> Dict[str, int]:
     return {a: int(data[a][idx].item()) for a in NODE_ATTRS}
 
@@ -185,6 +209,90 @@ def _extract_subgraph(data: Data, keep_atoms: Sequence[int]
         out[a] = data[a][surviving_edge_idx].clone()
     out.edge_is_linker = data.edge_is_linker[surviving_edge_idx].clone()
     return out, old_to_new, surviving_edge_idx
+
+
+#: chiral_tag indices for the two tetrahedral parities, from RDKIT_FEATURES.
+_CHI_CW, _CHI_CCW = 1, 2
+
+
+def _neighbour_order(data: Data, atom: int) -> List[int]:
+    """Neighbours of *atom* in edge_index order, first appearance only.
+
+    This is the order pyg_to_mol calls AddBond in, which is what RDKit
+    interprets a CHI_TETRAHEDRAL_CW/CCW tag against.
+    """
+    seen: List[int] = []
+    for e in range(data.edge_index.size(1)):
+        a, b = int(data.edge_index[0, e]), int(data.edge_index[1, e])
+        if atom not in (a, b):
+            continue
+        other = b if a == atom else a
+        if other not in seen:
+            seen.append(other)
+    return seen
+
+
+def _permutation_is_odd(target: List[int], source: List[int]) -> bool:
+    """Parity of the permutation taking *source* order to *target* order."""
+    pos = {v: i for i, v in enumerate(source)}
+    perm = [pos[v] for v in target if v in pos]
+    seen = [False] * len(perm)
+    transpositions = 0
+    for i in range(len(perm)):
+        if seen[i]:
+            continue
+        j, cycle = i, 0
+        while not seen[j]:
+            seen[j] = True
+            j = perm[j]
+            cycle += 1
+        transpositions += cycle - 1
+    return bool(transpositions % 2)
+
+
+def _fix_chirality_for_bond_reorder(out: Data, atom: int, meta: dict) -> bool:
+    """Flip the joint atom's chiral tag if reattaching permuted its bonds oddly.
+
+    CHI_TETRAHEDRAL_CW/CCW is not an intrinsic property: it is defined against
+    the ORDER of the atom's bonds, and pyg_to_mol adds bonds in edge_index
+    order. Detaching rebuilds the template's edge_index and attaching appends
+    the restored bond at the end, so the joint atom's neighbours come back in a
+    different order and the same tag then denotes the MIRROR IMAGE. The tag
+    round-trips byte-for-byte and the molecule is still wrong -- measured, 21 of
+    22 round-trip failures were stereochemistry-only with connectivity intact.
+
+    So this is a correction to the ENCODING, not to the chemistry: it makes the
+    reattached graph denote the structure the original denoted.
+
+    The original order is reconstructed from `incident_features` (the core-side
+    neighbours, in their stored order) with the cut bond reinserted at
+    `cut_bond_rank`. An earlier attempt assumed only the cut bond moved and
+    corrected a single cyclic shift; that made the aggregate WORSE, because
+    subgraph extraction reorders the core's own bonds too. The parity is
+    therefore computed over the full ordering.
+    """
+    rank = meta.get("cut_bond_rank")
+    if rank is None or int(rank) < 0:
+        return False            # -1 = not recorded (R-group side, or an old corpus)
+    tag = int(out.chiral_tag[atom].item())
+    if tag not in (_CHI_CW, _CHI_CCW):
+        return False                       # unspecified or non-tetrahedral
+
+    now = _neighbour_order(out, atom)
+    if len(now) < 3:
+        return False                       # not a stereocentre
+
+    core_nbrs = [rec["neighbour"] for rec in meta.get("incident_features", [])]
+    cut_nbrs = [n for n in now if n not in core_nbrs]
+    if len(cut_nbrs) != 1 or len(core_nbrs) + 1 != len(now):
+        return False                       # cannot reconstruct; leave it alone
+    original = list(core_nbrs)
+    original.insert(min(int(rank), len(original)), cut_nbrs[0])
+
+    if _permutation_is_odd(now, original):
+        out.chiral_tag[atom] = _CHI_CCW if tag == _CHI_CW else _CHI_CW
+        return True
+    return False
 
 
 def _append_atom(target: Data, source: Data, source_idx: int) -> int:
@@ -388,6 +496,16 @@ def detach_rgroups_multi(mol_data: Data,
     snap_atom_orig: List[Dict[str, int]] = []
     snap_cut_bond: List[Dict[str, int]] = []
     snap_in_core_incident: List[List[dict]] = []
+    # Where the cut bond sat among the joint atom's bonds, in edge_index order.
+    #
+    # A chiral tag is meaningless on its own: CHI_TETRAHEDRAL_CW/CCW is defined
+    # against the ORDER of the atom's bonds, and pyg_to_mol adds bonds in
+    # edge_index order. attach_rgroups appends the restored bond at the END, so
+    # a bond that was 2nd of 4 comes back 4th -- an odd permutation, which
+    # inverts the atom's apparent chirality. The tag round-trips perfectly and
+    # the molecule is still wrong. Measured before this fix: 21 of 22 round-trip
+    # failures were stereochemistry-only, with connectivity correct 249/250.
+    snap_cut_rank: List[int] = []
     exclude_for_incident = {rg_l for (_s, _c, rg_l, _e) in parsed}
     for (_rg_set, core_l, _rg_l, cut_e_idx) in parsed:
         snap_atom_orig.append(_atom_feature_snapshot(mol_data, core_l))
@@ -395,6 +513,7 @@ def detach_rgroups_multi(mol_data: Data,
         snap_in_core_incident.append(
             _snapshot_in_core_incident(mol_data, core_l, core_set,
                                        exclude_atoms=exclude_for_incident))
+        snap_cut_rank.append(_cut_bond_rank(mol_data, core_l, cut_e_idx))
 
     # ---------------- TEMPLATE -------------------------------------------
     template, core_old_to_new, _ = _extract_subgraph(mol_data, core_atoms)
@@ -416,14 +535,16 @@ def detach_rgroups_multi(mol_data: Data,
                 "atom_features":     meta["atom_features"],
                 "incident_features": new_incident,
                 "cut_bond_features": meta["cut_bond_features"],
+                "cut_bond_rank":     meta.get("cut_bond_rank", -1),
             }
         template.linker_metas = preserved_metas
     else:
         template.linker_id = torch.zeros(template.num_nodes, dtype=torch.long)
         template.linker_metas: Dict[int, dict] = {}
 
-    for (_rg_set, core_l, _rg_l, _), lid, atom_orig, cut_orig, incident_orig in zip(
-            parsed, ids, snap_atom_orig, snap_cut_bond, snap_in_core_incident):
+    for (_rg_set, core_l, _rg_l, _), lid, atom_orig, cut_orig, incident_orig, cut_rank in zip(
+            parsed, ids, snap_atom_orig, snap_cut_bond, snap_in_core_incident,
+            snap_cut_rank):
         new_core_l = int(core_old_to_new[core_l].item())
         mask_linker_atom(template, new_core_l)
         template.linker_id[new_core_l] = lid
@@ -438,6 +559,7 @@ def detach_rgroups_multi(mol_data: Data,
                 "atom_features":     atom_orig,
                 "incident_features": remapped_incident,
                 "cut_bond_features": cut_orig,
+                "cut_bond_rank":     cut_rank,
             }
 
     _ensure_molpla_attrs(template)
@@ -468,6 +590,9 @@ def detach_rgroups_multi(mol_data: Data,
                 "atom_features":     atom_orig,
                 "incident_features": [],
                 "cut_bond_features": cut_orig,
+                # -1, not None: PyG collates linker_metas and cannot infer a dtype
+                # for None, so a mixed batch of template and R-group raises.
+                "cut_bond_rank":     -1,
                 "rgroup_neighbour":  new_rg_neighbour,
             }}
         else:
@@ -815,6 +940,7 @@ def attach_rgroups(template_data: Data,
                         out[a][e_idx] = val
                     out.edge_is_linker[e_idx] = False
 
+
     # ---- step B: restore each cut bond on the corresponding A'-B edge ----
     # bond_features overrides per joint take precedence; else the rgroup's
     # cut_bond_features; else the default single bond.
@@ -872,6 +998,17 @@ def attach_rgroups(template_data: Data,
     for _, t_link, _ in pairs:
         out.linker_id[t_link] = 0
     out.num_nodes = int(keep_mask.sum().item())
+
+    # ---- chirality: only correctable once every cut bond exists ------------
+    # This MUST come after step B. Run during restore_features it sees the joint
+    # with one bond missing, reads fewer than three neighbours, and silently
+    # declines to act -- which is how the first version of this fix did nothing
+    # while looking installed.
+    if restore_features:
+        for lid, t_link, _ in pairs:
+            meta = (template_data.linker_metas or {}).get(lid)
+            if meta is not None:
+                _fix_chirality_for_bond_reorder(out, t_link, meta)
 
     # ---- carry forward template's linker_metas for any joints we DIDN'T attach
     consumed = set(lid for lid, _, _ in pairs)
