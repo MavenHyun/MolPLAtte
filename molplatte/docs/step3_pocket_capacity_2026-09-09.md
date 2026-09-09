@@ -146,6 +146,15 @@ NOT supported:
 
 ## 6. Next
 
+> **ANSWERED 2026-09-09** in
+> [egnn_pocket_probe_2026-09-09.md](egnn_pocket_probe_2026-09-09.md). No 3D
+> representation clears the sequence baseline, so a trained EGNN is not
+> justified here. Two things did turn up: 93% of the ESM-2 signal below is
+> recoverable from residue COMPOSITION with no geometry at all, and across
+> receptor families geometry beats composition 2.6x and nearly matches ESM-2 —
+> untrained. Geometry is the representation that transfers; it just cannot help
+> a target this fine-grained.
+
 **The EGNN question is now genuinely open rather than deprioritised.** The
 09-05 reasoning — geometry cannot be the bottleneck while the sequence signal is
 injected and does nothing — no longer holds, because we now know the sequence
