@@ -21,6 +21,7 @@ from loss_modules      import LossModuleMolPLAtte         # noqa: F401  (resolve
 from lightning_modules import MolPLAtteLightningModule    # noqa: F401  (resolved via getattr)
 
 from callbacks import (
+    AssemblyReconstruction,
     FAISSRetrieval,
     PredictionTable,
     RepresentationHealth,
@@ -270,6 +271,7 @@ def get_callbacks(config: DictConfig, ckpt_path: Path) -> List[pl.Callback]:
     # monitor, EarlyStopping raises rather than degrading -- so it is switched
     # off explicitly instead of being fed a metric that does not exist.
     es_enabled = bool(es_cfg.get("enabled", True))
+    asm_cfg = config.get("assembly", {}) or {}
     ckpt_cfg = config.get("checkpoint", {}) or {}
     ckpt_monitor = str(ckpt_cfg.get("monitor", es_monitor))
     ckpt_mode    = str(ckpt_cfg.get("mode", es_mode))
@@ -311,6 +313,17 @@ def get_callbacks(config: DictConfig, ckpt_path: Path) -> List[pl.Callback]:
         PredictionTable(k=5, max_rows=500, log_every_n_epochs=1,
                         enable_after_epoch=3, out_dir=table_dir,
                         monitor=ckpt_monitor, mode=ckpt_mode),
+        # End-to-end molecule reconstruction. The contrastive losses say whether
+        # embeddings separate; they cannot say whether the model can BUILD the
+        # molecule, which is what lead optimization delivers. Logs a
+        # ground-truth control alongside, so a drop is attributable to the head
+        # or to the graph plumbing rather than ambiguous between them.
+        *([AssemblyReconstruction(
+            n_molecules=int(asm_cfg.get("eval_molecules", 300)),
+            enable_after_epoch=int(asm_cfg.get("eval_after_epoch", 1)),
+            every_n_epochs=int(asm_cfg.get("eval_every_n_epochs", 1)))]
+          if asm_cfg.get("enabled") and asm_cfg.get("eval_reconstruction", True)
+          else []),
     ]
 
     # Full-corpus R-group library retrieval -- MolPLA's actual RGR evaluation.

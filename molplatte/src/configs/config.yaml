@@ -84,6 +84,14 @@ rgroup_library:
 # ---------------------------------------------------------------------------
 assembly:
   enabled:     false
+  # Reconstruct real molecules every validation epoch and log the result.
+  # Per-attribute cross-entropy can look excellent while the joint is wrong --
+  # the attributes are independent classifiers and only their AGREEMENT yields
+  # a valid atom. Costs a few seconds per 300 molecules (RDKit, single-threaded).
+  eval_reconstruction:  true
+  eval_molecules:       300
+  eval_after_epoch:     1
+  eval_every_n_epochs:  1
   head:        AssemblyHead
   loss_weight: 0.5        # weight in the total loss alongside the three contrastive terms
   head_kwargs:
