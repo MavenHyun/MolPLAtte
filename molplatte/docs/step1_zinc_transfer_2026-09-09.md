@@ -1,5 +1,24 @@
 # Does ZINC pretraining help? — STEP 1 → STEP 2 transfer
 
+> **AMENDED 2026-09-09.** Three corrections, all from
+> [loss_reweighting_and_freezing_2026-09-09.md](loss_reweighting_and_freezing_2026-09-09.md):
+>
+> 1. **§2 and §3 compared a test-split score against val-split scores.** The
+>    flavour-only baseline (0.3098) was a `run_mode=test` number; every other
+>    figure came from the in-training `val` callback. The differing priors
+>    (0.0233 vs 0.0256) were the tell and were logged as a caveat rather than
+>    read as a split mismatch. Rescored on one split, ZINC pretraining costs
+>    **−0.0125 H@1 (3.8 SE)**, not −0.0027 — the verdict holds and is stronger.
+> 2. **§3 and §5 over-generalise from one frozen encoder.** Freezing a
+>    *flavour*-trained encoder GAINS +0.0098 H@1 against an identical unfrozen
+>    control. What §3 measured is that the ZINC encoder is wrong for flavour,
+>    not that freezing is harmful.
+> 3. **§5's linker trade-off does not exist.** A weight sweep moves the linker
+>    loss 43% and moves `rgroup` 0.4% and retrieval by noise. The terms are
+>    decoupled.
+>
+> Section text below is left as written, with pointers at the affected claims.
+
 Runs of 2026-09-08/09, seed 911012, all scored against the same
 668,913-row union library (`zincbase__flavor__crossdocked__tastepocket`,
 effective vocabulary 6,916).
@@ -83,6 +102,11 @@ deltas are on `novel`, which is exactly where pretraining was supposed to help.
 > flavour-only model handles the larger library just as well; the library was
 > never the handicap it was assumed to be. The A/B is what settled it.
 
+>  **The caveat below is the bug.** Differing priors mean differing QUERY SETS,
+>  not differing subsamples of one set: this row compares a test-split score
+>  against a val-split score. See the amendment at the top; the corrected
+>  like-for-like table is in the reweighting document.
+
 Caveats: single seed; 6 ZINC + 20 flavour epochs against 30 flavour epochs; the
 two runs drew different 20,000-query subsamples (visible in the differing
 priors, 0.0233 vs 0.0256).
@@ -90,6 +114,13 @@ priors, 0.0233 vs 0.0256).
 ---
 
 ## 3. The freeze ablation — this one is unambiguous
+
+> **Amended.** Unambiguous about THIS encoder, not about freezing. Freezing a
+> flavour-trained encoder instead gains +0.0152 (4.6 SE) over the same
+> baseline, and +0.0098 (3.0 SE) over an identical unfrozen control. The
+> mechanism described further down — a frozen encoder bounds the heads'
+> hypothesis space — is right, and cuts both ways: a penalty when the fixed
+> embeddings are poor, a regulariser when they are good.
 
 `freeze=[encoder]`, 5,844,464 of 6,808,535 parameters held fixed (85.8%).
 
@@ -196,11 +227,18 @@ capability exists only because STEP 1 ran.
 **Step 1 earns its place, but for C, not A.** The original plan asked
 `A (freeze?)` and `C (freeze?)`. The answers now differ:
 
-- **Do NOT freeze the encoder in Step 2.** 20 SE of evidence. ZINC's encoder is
-  a worse flavour encoder than one trained on flavour chemistry.
+- ~~**Do NOT freeze the encoder in Step 2.**~~ **Superseded.** The evidence
+  showed ZINC's encoder is a worse flavour encoder — which is the second half of
+  that sentence and the part that survives. Freezing a flavour-trained encoder
+  is the best Step 2 result to date and IS worth adopting, pending a seed
+  repeat.
 - **Freezing the assembly head is worth testing in Step 3.** It holds at 97.2%
   frozen, and 243 tastepocket records cannot teach assembly. Protecting it
   there is the same argument that justified training it on ZINC.
+
+> **Amended: measured, and inert.** The sweep below was run. Forcing the linker
+> loss down does not move `rgroup` or retrieval, so the two terms are not
+> competing and the paragraph's reasoning does not hold.
 
 **The rising linker-contrastive loss is now confirmed across corpora.** It rose
 through STEP 1 on ZINC (2.90 → 3.12) and rises in BOTH STEP 2 arms — trainable

@@ -1,5 +1,18 @@
 # STEP 2 — pocket-conditioned finetuning: results
 
+> **FOLLOWED UP 2026-09-09** in
+> [step3_pocket_capacity_2026-09-09.md](step3_pocket_capacity_2026-09-09.md).
+> Both explanations this document left open have now been tested. The pocket
+> representation IS informative (it predicts ligand chemotype across unseen
+> receptors), and constraining the reduction from 168,096 to 1,056 parameters
+> changes nothing (+0.002 H@1, 0.13 SE). The cause is a granularity mismatch:
+> the pocket resolves chemotype, R-group retrieval needs exact fragments.
+>
+> Two items in "So what is worth doing next" are superseded: CrossDocked is not
+> the fix, since capacity and data are not the binding constraint; and the EGNN
+> ablation is no longer ruled out — its reasoning depended on the sequence
+> signal being adequate, which it is not.
+
 Run 2026-09-05. Seed 911012, 40 epochs per fold, GPU1.
 Corpus `tastepocket_corpus` (243 records / 734 decompositions / 906 R-groups),
 scored against the 91,935-row union library (effective size 946).
@@ -145,9 +158,10 @@ returns it for both -- but the query counts differ slightly (183 vs 178 on fold
    magnitude while changing nothing, the prediction is `cond - shuf` near zero --
    and confirming that would establish the signal is inert rather than merely
    redundant with the core.
-3. The EGNN ablation is NOT next. Geometry cannot be the bottleneck while the
-   sequence-derived signal is already being injected at half the flavour
-   magnitude and doing nothing.
+3. ~~The EGNN ablation is NOT next.~~ **Superseded 2026-09-09.** The premise was
+   that the sequence signal is adequate and unused. It is unused because it is
+   chemotype-coarse, so whether geometry resolves finer contacts is an open
+   question, testable in a minute with the probe harness.
 
 ---
 

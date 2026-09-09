@@ -28,6 +28,21 @@ Four choices here are load-bearing:
 * **The output layer is zero-initialised.** STEP 1.5 then starts from exactly
   the STEP 1 solution and has to earn any pocket contribution, instead of
   beginning with a random perturbation of a converged model.
+
+``basis_path`` addresses the capacity problem measured on 2026-09-09. The free
+reduction is 1280 -> 128 -> 32, i.e. 168,096 parameters fitted from 243
+tastepocket records -- 692 per record. A probe over the 1,255 pocket sites showed
+the ESM-2 space DOES carry ligand chemistry across unseen receptors (Tanimoto
+0.35 vs 0.12 for a random pocket), and that signal lives in the metric structure
+of the space, which a reduction that underdetermined cannot preserve; the easiest
+thing it can fit instead is receptor identity, which is useless on a held-out
+receptor by construction.
+
+With a basis, the 1280 -> 32 step becomes a FIXED orthonormal projection fitted
+without labels (PCA over training-fold pockets only), and the only learned part
+is a 32 -> 32 adapter: 1,056 parameters instead of 168,096. The metric structure
+survives by construction because an orthonormal projection is close to an
+isometry on the retained subspace.
 """
 from __future__ import annotations
 
@@ -75,6 +90,7 @@ class PocketConditioning(nn.Module):
         hidden_dim: Optional[int] = None,
         dropout: float = 0.1,
         pocket_dropout: float = 0.0,
+        basis_path: Optional[str] = None,
     ) -> None:
         super().__init__()
         if flavor_dim < 0 or pocket_input_dim < 0 or pocket_dim < 0:
@@ -87,8 +103,24 @@ class PocketConditioning(nn.Module):
         self.pocket_dim = int(pocket_dim) if pocket_input_dim else 0
         self.pocket_dropout = float(pocket_dropout)
 
+        # Declared before any early return so `self.basis` always exists, and as
+        # a buffer so `.to(device)` and state_dict round-trips cover it.
+        self.register_buffer("basis", None)
+        self.register_buffer("basis_mean", None)
+        self.register_buffer("basis_scale", None)
+
         if self.pocket_input_dim == 0:
             self.project = None
+            return
+
+        if basis_path:
+            self._load_basis(basis_path)
+            # Learned part is the adapter ALONE; the basis is a buffer, so it is
+            # neither trained nor perturbed by a warm start.
+            out = nn.Linear(self.pocket_dim, self.pocket_dim)
+            nn.init.zeros_(out.weight)
+            nn.init.zeros_(out.bias)
+            self.project = nn.Sequential(nn.Dropout(dropout), out)
             return
 
         hidden = int(hidden_dim) if hidden_dim else max(4 * self.pocket_dim, 1)
@@ -106,6 +138,38 @@ class PocketConditioning(nn.Module):
             nn.Dropout(dropout),
             out,
         )
+
+    def _load_basis(self, basis_path: str) -> None:
+        """Install a fixed PCA projection as non-trainable buffers.
+
+        The file must carry ``components`` [pocket_dim, pocket_input_dim] and
+        ``mean`` [pocket_input_dim]. Shapes are checked rather than trusted: a
+        basis fitted at a different width would broadcast into silence.
+        """
+        import numpy as np
+
+        z = np.load(basis_path)
+        for k in ("components", "mean"):
+            if k not in z:
+                raise KeyError(f"{basis_path} has no '{k}' array")
+        comp = torch.as_tensor(z["components"], dtype=torch.float32)
+        mean = torch.as_tensor(z["mean"], dtype=torch.float32)
+        if comp.shape != (self.pocket_dim, self.pocket_input_dim):
+            raise ValueError(
+                f"basis components {tuple(comp.shape)} != expected "
+                f"{(self.pocket_dim, self.pocket_input_dim)}"
+            )
+        if mean.shape != (self.pocket_input_dim,):
+            raise ValueError(
+                f"basis mean {tuple(mean.shape)} != expected "
+                f"{(self.pocket_input_dim,)}"
+            )
+        scale = z["scale"] if "scale" in z else np.ones(self.pocket_dim)
+        self.basis = comp
+        self.basis_mean = mean
+        self.basis_scale = torch.as_tensor(
+            scale, dtype=torch.float32
+        ).clamp_min(1e-6)
 
     # -- widths ------------------------------------------------------------
     @property
@@ -160,5 +224,17 @@ class PocketConditioning(nn.Module):
             ).to(condvec.dtype)
             has_pocket = has_pocket * keep
 
-        projected = self.project(pocket) * has_pocket
+        if self.basis is not None:
+            # Fixed orthonormal projection, then unit-variance per component so
+            # the adapter and the 24 flavor bits start on comparable scales.
+            reduced = (pocket - self.basis_mean) @ self.basis.t()
+            reduced = reduced / self.basis_scale
+            # NOT a residual: the adapter's zero-init must still mean "the
+            # pocket contributes exactly nothing at step 0", or a warm start
+            # would jump off the pretrained solution the moment it loads.
+            # A zero-init 32x32 learns the pass-through it needs from 243
+            # records; 168k free parameters could not.
+            projected = self.project(reduced) * has_pocket
+        else:
+            projected = self.project(pocket) * has_pocket
         return torch.cat([flavor, projected], dim=-1)

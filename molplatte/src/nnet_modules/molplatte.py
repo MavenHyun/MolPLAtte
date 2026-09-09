@@ -101,6 +101,12 @@ class MolPLAtteConfig:
     #: Probability of dropping a row's pocket half entirely during training, so
     #: the model must stay able to answer from flavor alone.
     pocket_dropout: float = 0.0
+    #: Path to a fixed PCA basis (see build_pocket_basis.py). When set, the
+    #: 1280 -> 32 reduction is a frozen orthonormal projection and only a
+    #: 32 -> 32 adapter is learned: 1,056 parameters instead of 168,096, which
+    #: is what 243 tastepocket records can actually support. MUST be the basis
+    #: fitted WITHOUT the fold being scored, or the evaluation leaks.
+    pocket_basis_path: Optional[str] = None
 
     #: Assembly head -- recovers the chemistry masking destroyed at each joint,
     #: which is what turns "retrieve this R-group" into "attach it like this".
@@ -195,6 +201,7 @@ class MolPLAtte(nn.Module):
             pocket_dim=c.pocket_dim,
             dropout=c.dropout_rate,
             pocket_dropout=c.pocket_dropout,
+            basis_path=c.pocket_basis_path,
         )
         self.nnet["query_projector"] = getattr(projector_registry, c.query_projector)(
             **c.query_projector_kwargs

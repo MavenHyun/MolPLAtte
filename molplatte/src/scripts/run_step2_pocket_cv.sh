@@ -60,6 +60,7 @@ common_args () {
         nnet_module_kwargs.pocket_input_dim=$POCKET_INPUT_DIM \
         nnet_module_kwargs.pocket_dim=$POCKET_DIM \
         nnet_module_kwargs.pocket_dropout=$POCKET_DROPOUT \
+        ${BASIS_ARG} \
         init_weights_from=$EXPANDED \
         rgroup_library.vocab_path=$VOCAB \
         rgroup_library.enable_after_epoch=0 \
@@ -68,8 +69,18 @@ common_args () {
 }
 
 # --- folds: estimate ------------------------------------------------------
+# BASIS_DIR set => the 1280->32 reduction is a FROZEN PCA projection and only a
+# 32->32 adapter trains (1,056 params instead of 168,096). Each fold MUST use
+# the basis fitted without it; fold0.npz for fold 0 and so on. Passing full.npz
+# to a scored fold would leak the held-out receptors into the projection.
 for k in $FOLDS; do
-  exp="s2-pocket-fold${k}-s${SEED}"
+  exp="s2-pocket-fold${k}-s${SEED}${BASIS_DIR:+-pca}"
+  BASIS_ARG=""
+  if [ -n "${BASIS_DIR:-}" ]; then
+    b="$BASIS_DIR/fold${k}.npz"
+    [ -f "$b" ] || { echo "missing basis $b"; exit 1; }
+    BASIS_ARG="+nnet_module_kwargs.pocket_basis_path=$b"
+  fi
   if [ -f "$LOGDIR/$exp.log" ]; then echo "  SKIP $exp (log exists)"; continue; fi
   echo "== fold $k"
   CUDA_VISIBLE_DEVICES="$GPU" python3 -u run.py \
