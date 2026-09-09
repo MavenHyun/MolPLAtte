@@ -21,6 +21,11 @@ from pathlib import Path
 import pytest
 
 SRC = Path(__file__).resolve().parents[1] / "src"
+#: The training package, derived from this file rather than from $HOME. A
+#: hardcoded ~/github/MolPLAtte path passes on the machine that wrote it and
+#: fails on any checkout elsewhere -- which is exactly what CI is for, and is
+#: how this was found.
+TRAIN_SRC = Path(__file__).resolve().parents[2] / "molplatte" / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 REPO = Path(__file__).resolve().parents[1]
@@ -628,7 +633,10 @@ class TestRetrievalGalleryIsCapped:
     def test_oversized_gallery_is_subsampled(self):
         import sys
 
-        sys.path.insert(0, str(Path.home() / "github/MolPLAtte/molplatte/src"))
+        pytest.importorskip("pytorch_lightning",
+                            reason="training stack absent; FAISSRetrieval needs it")
+
+        sys.path.insert(0, str(TRAIN_SRC))
         import numpy as np
         import torch
 
@@ -655,7 +663,10 @@ class TestRetrievalGalleryIsCapped:
     def test_default_cap_is_set(self):
         import sys
 
-        sys.path.insert(0, str(Path.home() / "github/MolPLAtte/molplatte/src"))
+        pytest.importorskip("pytorch_lightning",
+                            reason="training stack absent; FAISSRetrieval needs it")
+
+        sys.path.insert(0, str(TRAIN_SRC))
         from callbacks.FAISSRetrieval import FAISSRetrieval
 
         assert FAISSRetrieval().max_gallery > 0, "uncapped gallery is quadratic"

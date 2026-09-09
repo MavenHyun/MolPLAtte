@@ -46,6 +46,10 @@ jobs:
           pip install torch --index-url https://download.pytorch.org/whl/cpu
           pip install torch_geometric
           pip install rdkit numpy prody networkx pytest
+          # FAISSRetrieval imports pytorch_lightning, so the retrieval-gallery
+          # guard needs it. Without it the guard skipped silently on CI while
+          # passing locally -- the guard would have been decoration.
+          pip install pytorch_lightning
 
       - name: pytest
         run: python -m pytest molplatte_preprocess/tests -v --tb=short
