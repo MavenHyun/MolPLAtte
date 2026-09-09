@@ -288,7 +288,17 @@ class LeadOptimizer:
                     instance = build_instance(
                         mol_data, decomp, islinked,
                         mol_id="query", decomp_idx=d_idx,
-                        store_orig=False, compute_hashes=False,
+                        # store_orig carries the joint's ORIGINAL atom features
+                        # (is_aromatic, is_in_ring, hybridization) in
+                        # linker_metas. Retrieval never reads them, but assembly
+                        # must: the head predicts only atomic_num, formal_charge
+                        # and total_num_hs, so everything else has to be restored
+                        # from the parent. Without it those come back None and
+                        # the joint atom is rebuilt non-aromatic, which breaks
+                        # the ring it belongs to -- every product of an aromatic
+                        # core was malformed until 2026-09-09. Off when not
+                        # assembling, since it is pure overhead there.
+                        store_orig=bool(assemble), compute_hashes=False,
                     )
                 except Exception as exc:  # noqa: BLE001
                     logger.debug("slot %d of decomp %d failed: %s", slot, d_idx, exc)
@@ -335,6 +345,9 @@ class LeadOptimizer:
                 ]
 
                 if assemble:
+                    # Aromatic atoms carried by the R-group being REMOVED. The
+                    # product is not expected to keep them.
+                    slot_rgroup_smiles = self._rgroup_smiles_of(mol, decomp, slot)
                     # The template is instance.P: the core with this joint
                     # masked. joint_linker_ids is 1:1 with the detached
                     # R-groups, and exactly one is detached here.
@@ -348,8 +361,17 @@ class LeadOptimizer:
                         sugg[r].product = prod
                         sugg[r].product_error = err
                         if prod:
+                            # Compare against the CORE, not the parent. The
+                            # parent's count includes the R-group being
+                            # REMOVED, so replacing an aromatic substituent
+                            # (a phenyl, say) with an aliphatic one legitimately
+                            # lowers it -- that is a correct substitution, not a
+                            # broken ring, and scoring it as failure made this
+                            # metric read ~88% when nothing was wrong.
+                            removed = _n_aromatic(slot_rgroup_smiles)
                             sugg[r].aromaticity_kept = (
-                                _n_aromatic(prod) >= _n_aromatic(smiles))
+                                _n_aromatic(prod)
+                                >= _n_aromatic(smiles) - removed)
 
                 results.append(SlotResult(
                     decomp_index=d_idx,
@@ -411,8 +433,18 @@ class LeadOptimizer:
         except (IndexError, AttributeError) as exc:
             return None, f"no joint {linker_id} on template or R-group: {exc}"
 
+        # linker_metas is a per-graph dict keyed by joint id. PyG's collate
+        # indexes every key of the first graph's dict into the second, so
+        # batching a template that HAS metas against a library R-group that
+        # does not raises KeyError. The encoder never reads them, so they come
+        # off the copies that get batched and are read from `template` below.
+        enc_tpl, enc_rg = copy.copy(tpl), copy.copy(rg)
+        for g in (enc_tpl, enc_rg):
+            if hasattr(g, "linker_metas"):
+                delattr(g, "linker_metas")
+
         # One encoder pass over both views, exactly as training does.
-        batch = Batch.from_data_list([tpl, rg]).to(self.device)
+        batch = Batch.from_data_list([enc_tpl, enc_rg]).to(self.device)
         out = enc(batch)
         H = out.node_embeddings
         offset = int((batch.batch == 0).sum().item())
@@ -423,7 +455,8 @@ class LeadOptimizer:
 
         metas = dict(getattr(tpl, "linker_metas", {}) or {})
         meta = dict(metas.get(linker_id) or {})
-        atom_feats = dict(meta.get("atom_features") or {})
+        meta_atom_orig = dict(meta.get("atom_features") or {})
+        atom_feats = dict(meta_atom_orig)
         atom_feats.update(atom_pred)          # predicted attrs win over the original
         bond_feats = dict(meta.get("cut_bond_features") or {})
         bond_feats.update(bond_pred)
@@ -432,18 +465,42 @@ class LeadOptimizer:
         metas[linker_id] = meta
         tpl.linker_metas = metas
 
-        try:
-            merged = attach_rgroups(tpl, [rg], linker_ids=[linker_id],
-                                    restore_features=True,
-                                    bond_features={linker_id: bond_feats})
-        except Exception as exc:  # noqa: BLE001
-            return None, f"attach failed: {type(exc).__name__}: {exc}"
-        try:
-            mol = pyg_to_mol(merged, sanitize=True)
-            smi = Chem.MolToSmiles(mol)
-        except Exception as exc:  # noqa: BLE001
-            return None, f"unsanitisable: {type(exc).__name__}"
-        return (smi, "") if smi else (None, "empty SMILES")
+        # The predicted attributes describe the joint as it was with the
+        # ORIGINAL R-group. Attaching a different one can make them invalid --
+        # a total_num_hs of 1 on an oxygen that now carries two heavy
+        # neighbours yields [OH] with the wrong valence. So the predicted
+        # chemistry is tried first and the STORED chemistry is the fallback:
+        # the joint atom belongs to the core, and its own H count and charge
+        # stay right for any substituent joined by the same bond order.
+        stored_atom = dict(meta_atom_orig)
+        attempts = [("predicted", atom_feats)]
+        if stored_atom and stored_atom != atom_feats:
+            merged_feats = dict(atom_feats)
+            merged_feats.update({k: v for k, v in stored_atom.items()
+                                 if k in ("total_num_hs", "formal_charge")})
+            attempts.append(("stored H/charge", merged_feats))
+
+        last = "attach failed"
+        for label, feats in attempts:
+            meta["atom_features"] = feats
+            metas[linker_id] = meta
+            tpl.linker_metas = metas
+            try:
+                merged = attach_rgroups(tpl, [rg], linker_ids=[linker_id],
+                                        restore_features=True,
+                                        bond_features={linker_id: bond_feats})
+                mol = pyg_to_mol(merged, sanitize=True)
+                smi = Chem.MolToSmiles(mol)
+            except Exception as exc:  # noqa: BLE001
+                last = f"unsanitisable ({label}): {type(exc).__name__}"
+                continue
+            # MolToSmiles can emit a string RDKit will not read back -- a ring
+            # written part aromatic, an over-valent atom in brackets. Re-parsing
+            # is the only check that the product is a molecule, not just output.
+            if smi and Chem.MolFromSmiles(smi) is not None:
+                return smi, ""
+            last = f"product does not re-parse ({label}): {smi or "empty"}"
+        return None, last
 
     # -- display helpers ---------------------------------------------------
     def _graph_of_row(self, row: int, linker_id: int):
