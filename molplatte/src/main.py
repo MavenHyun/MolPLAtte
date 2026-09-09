@@ -121,10 +121,74 @@ def get_data_module(config: DictConfig, base_path: Path) -> MolPLAtteDataModule:
 
     return data_module
 
+#: Friendly aliases for the plan's component letters, so a config can say
+#: `freeze=[encoder]` instead of naming every module inside it.
+FREEZE_GROUPS = {
+    "encoder":    ["graph_encoder"],                      # A
+    "projectors": ["graph_projector", "node_projector",   # B
+                   "query_projector", "rgroup_projector"],
+    "assembly":   ["assembly_head"],                      # C
+    "pocket":     ["pocket_conditioning"],                # E
+}
+
+
+def apply_freezing(nnet_module: nn.Module, spec) -> None:
+    """Freeze the named components in place.
+
+    Freezing is a real decision, not a knob: a frozen ZINC encoder keeps the
+    chemistry pretraining bought, and also cannot adapt to a flavour
+    distribution whose molecules are smaller and differently decorated. So this
+    logs what it froze, with parameter counts, rather than doing it silently.
+
+    An unknown name raises. Silently ignoring a typo would leave a component
+    trainable while the config claims otherwise, and the loss curve would look
+    entirely normal.
+    """
+    names = [spec] if isinstance(spec, str) else list(spec or [])
+    if not names:
+        return
+    wanted: list = []
+    for n in names:
+        n = str(n).strip()
+        if n in FREEZE_GROUPS:
+            wanted += FREEZE_GROUPS[n]
+        elif n in nnet_module.nnet:
+            wanted.append(n)
+        else:
+            raise ValueError(
+                f"freeze: unknown component {n!r}; use one of "
+                f"{sorted(FREEZE_GROUPS)} or {sorted(nnet_module.nnet)}")
+
+    total = frozen = 0
+    for mod_name, module in nnet_module.nnet.items():
+        n_p = sum(p.numel() for p in module.parameters())
+        total += n_p
+        if mod_name in wanted:
+            for p in module.parameters():
+                p.requires_grad_(False)
+            module.eval()
+            frozen += n_p
+            logging.info(f"  FROZEN   {mod_name:22s} {n_p:>10,} params")
+        else:
+            logging.info(f"  trainable{mod_name:22s} {n_p:>10,} params")
+    logging.info(f"Freezing: {frozen:,} of {total:,} params frozen "
+                 f"({100*frozen/max(total,1):.1f}%)")
+
+
 def get_nnet_module(config: DictConfig) -> nn.Module:
     nnet_module = getattr(nm, config.nnet_module)(**config.nnet_module_kwargs)
     n_params = sum(p.numel() for p in nnet_module.parameters())
     logging.info(f"Number of Parameters         [{n_params:,}]")
+    freeze = config.get("freeze")
+    if freeze:
+        logging.info(f"STARTED =====> Freezing components {list(freeze)}")
+        apply_freezing(nnet_module, freeze)
+        trainable = sum(p.numel() for p in nnet_module.parameters()
+                        if p.requires_grad)
+        if trainable == 0:
+            raise ValueError("freeze left NOTHING trainable; the run would be "
+                             "a no-op that still produces a loss curve")
+        logging.info("FINISHED ====> Freezing components")
     return nnet_module
 
 

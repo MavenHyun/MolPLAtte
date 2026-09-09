@@ -34,6 +34,18 @@ checkpoint_mode: false
 # scripts/expand_checkpoint_for_pocket.py.
 init_weights_from: null
 
+# Components to hold fixed. Names: encoder (A), projectors (B), assembly (C),
+# pocket (E) -- or any module name in nnet directly. Empty = train everything.
+#
+#   STEP 2 example: freeze=[encoder] keeps the chemistry ZINC pretraining
+#   bought while the conditioning heads adapt. Note the trade: ZINC molecules
+#   are drug-like at ~337 Da median and flavour compounds are smaller, so a
+#   frozen encoder may represent the target domain poorly. Measure both.
+#
+# An unknown name RAISES rather than being ignored, because a typo would leave
+# the component trainable while the config claims otherwise.
+freeze: []
+
 early_stopping:
   enabled:  true      # false for a full-data run with no validation split
   monitor:  val/loss
