@@ -41,6 +41,8 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 import numpy as np
+
+from retrieval_scoring import logq_corrected, rgroup_temperature
 import pytorch_lightning as pl
 import torch
 
@@ -90,7 +92,7 @@ class RGroupLibraryRetrieval(pl.Callback):
         search_k: int = 1000,
         encode_batch_size: int = 1024,
         max_queries: Optional[int] = 20000,
-        temperature: float = 0.01,
+        temperature: Optional[float] = None,
         popularity_coef: float = 1.0,
     ) -> None:
         super().__init__()
@@ -101,9 +103,11 @@ class RGroupLibraryRetrieval(pl.Callback):
         self.search_k = search_k
         self.encode_batch_size = encode_batch_size
         self.max_queries = max_queries
-        # Must match the R-group loss temperature: the correction is
-        # sim/tau + coef * log p, and tau sets the scale the two terms trade at.
-        self.temperature = temperature
+        # Read from the training config rather than restated here, so this and
+        # LeadOptimizer cannot drift apart. Pass a float only to deliberately
+        # score at a temperature the model was NOT trained at.
+        self.temperature = (rgroup_temperature() if temperature is None
+                            else float(temperature))
         # MolDAM found the optimum at exactly the theoretically predicted 1.0.
         self.popularity_coef = popularity_coef
 
@@ -319,10 +323,8 @@ class RGroupLibraryRetrieval(pl.Callback):
             # library, so an item the correction would promote from outside the
             # top-k cannot be recovered. With search_k=1000 that mostly affects
             # hit@1000; hit@1..100 are essentially unaffected.
-            adj = (
-                scores / max(self.temperature, 1e-8)
-                + self.popularity_coef * self._log_prior[retrieved]
-            )
+            adj = logq_corrected(scores, self._log_prior[retrieved],
+                                 self.temperature, self.popularity_coef)
             order = np.argsort(-adj, axis=1)
             corrected = np.take_along_axis(retrieved, order, axis=1)
 
