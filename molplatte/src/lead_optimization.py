@@ -115,13 +115,17 @@ class LeadOptimizer:
 
     def __init__(self, model: MolPLAtte, vocab, device: str = "cuda",
                  popularity_coef: float = 1.0,
-                 temperature: float = 0.1) -> None:
+                 temperature: float = 0.01) -> None:
         self.model = model.to(device).eval()
         self.vocab = vocab
         self.device = device
         self.popularity_coef = float(popularity_coef)
-        # MUST match the R-group contrastive loss temperature (contrastive.py
-        # default 0.1). The corrected score is sim/tau + coef * log p(k), and
+        # MUST match the R-group contrastive loss temperature, which is set in
+        # configs/loss_module/default.yaml as loss_rgroup_kwargs.temperature and
+        # is 0.01 -- NOT the 0.1 default in contrastive.py, and not the 0.1 the
+        # assembly loss uses. The three contrastive terms each carry their own
+        # (graph 0.1, linker 0.05, rgroup 0.01); reading the wrong one puts this
+        # off by 10x. The corrected score is sim/tau + coef * log p(k), and
         # tau sets the scale at which the two terms trade off. Omitting it --
         # scoring sim + log p directly, as this did until 2026-09-09 -- leaves
         # the similarity term ~10x too small to matter: measured on the shipped
@@ -143,7 +147,7 @@ class LeadOptimizer:
     @classmethod
     def load(cls, checkpoint: str | Path, vocab_path: str | Path,
              device: str = "cuda", popularity_coef: float = 1.0,
-             temperature: float = 0.1, **model_kwargs) -> "LeadOptimizer":
+             temperature: float = 0.01, **model_kwargs) -> "LeadOptimizer":
         """Load a checkpoint and its library.
 
         ``model_kwargs`` must reproduce the architecture the checkpoint was
