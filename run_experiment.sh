@@ -146,9 +146,13 @@ step2)
   gpu_free
   FREEZE_ARG=""
   [ -n "${FREEZE:-}" ] && FREEZE_ARG="freeze=[$FREEZE]"
-  launch "contrain_${CORPUS:-coconut-flavordb-full}" \
-    python3 -u run.py experiment_name="contrain_${CORPUS:-coconut-flavordb-full}" \
-      hydra.run.dir="$REPO/molplatte/outputs/contrain_${CORPUS:-coconut-flavordb-full}" \
+  # EXP names the run. Defaults to the corpus, with any freeze spec appended, so
+  # an ablation does not collide with the baseline checkpoint -- the guard in
+  # launch() would otherwise refuse, which is right but unhelpful.
+  EXP="${EXP:-contrain_${CORPUS:-coconut-flavordb-full}${FREEZE:+_freeze-${FREEZE//,/-}}}"
+  launch "$EXP" \
+    python3 -u run.py experiment_name="$EXP" \
+      hydra.run.dir="$REPO/molplatte/outputs/$EXP" \
       random_seed="$SEED" init_weights_from="$EXPANDED" \
       data_module_kwargs.dataset_version="${CORPUS:-coconut-flavordb-full}" \
       data_module_kwargs.condvec_dim=24 nnet_module_kwargs.condvec_dim=24 \
@@ -156,7 +160,7 @@ step2)
       rgroup_library.vocab_path="$UNION" \
       ++trainer_kwargs.max_epochs="${EPOCHS:-20}" \
       wandb.project="$WANDB_PROJECT" wandb.group=step2-flavor-contrain \
-      wandb.job_type=contrain wandb.name="contrain_${CORPUS:-coconut-flavordb-full}"
+      wandb.job_type=contrain wandb.name="$EXP"
   ;;
 
 # ---------------------------------------------------------------- step 3
