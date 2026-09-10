@@ -308,10 +308,27 @@ class LeadOptimizer:
 
         cv = self.condvec(flavor, pocket)
         results: List[SlotResult] = []
+        # Two decompositions can detach the SAME atoms. A molecule with four
+        # equivalent methoxy groups yields one decomposition that cuts two of
+        # them and another that cuts one, and the slot for the shared group
+        # appears in both -- with only one R-group detached at a time, the
+        # remaining scaffold is identical, so the products are identical too.
+        # Verified on a tetramethoxyflavone: d0/s1 and d1/s0 returned the same
+        # products for every suggestion. Deduplicating on the replaced atom set
+        # removes a whole redundant encoder pass and a duplicate gallery
+        # section, and leaves the table unchanged (it already deduped on the
+        # product SMILES).
+        seen_slots: set = set()
 
         for d_idx, decomp in enumerate(decomps[:max_decompositions]):
             n = len(decomp.rgroups)
             for slot in range(n):
+                key = frozenset(getattr(decomp.rgroups[slot], "rgroup_atoms", ()) or ())
+                if key and key in seen_slots:
+                    logger.debug("decomp %d slot %d duplicates an earlier slot "
+                                 "on atoms %s; skipped", d_idx, slot, sorted(key))
+                    continue
+                seen_slots.add(key)
                 # Detach exactly one R-group; the rest stay attached. That is
                 # the lead-optimization question -- replace THIS substituent --
                 # rather than the training-time multi-detach.

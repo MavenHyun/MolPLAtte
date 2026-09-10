@@ -294,12 +294,17 @@ def _score_caption(row) -> str:
         v = row.get("d" + key)
         return "" if v is None else f" ({fmt.format(v)})"
 
-    return (f"MW {f('MW','{:.1f}')}{d('MW','{:+.1f}')}   "
-            f"logP {f('logP')}{d('logP')}   QED {f('QED')}{d('QED')}\n"
-            f"SA {f('SAScore')}{d('SAScore')}   "
-            f"NP {f('NPScore')}{d('NPScore')}   "
-            f"count {int(row.get('corpus_count') or 0):,}"
-            f"{'   NOVEL' if row.get('is_novel') else ''}")
+    lines = [f"MW   {f('MW','{:.1f}')}{d('MW','{:+.1f}')}"
+             f"      logP {f('logP')}{d('logP')}"
+             f"      QED  {f('QED')}{d('QED')}",
+             f"SA   {f('SAScore')}{d('SAScore')}"
+             f"      NP   {f('NPScore')}{d('NPScore')}"
+             f"      corpus count {int(row.get('corpus_count') or 0):,}"]
+    if row.get("vina_score") is not None:
+        lines.append(f"vina {row['vina_score']:+.2f} kcal/mol"
+                     + (f"  ({row['dvina']:+.2f} vs input)"
+                        if row.get("dvina") is not None else ""))
+    return "\n".join(lines)
 
 
 #: Interpreter that can `import pymol`. PyMOL pulls Qt5/X11 and conda would put
@@ -472,43 +477,56 @@ def render_gallery(results, input_smiles: str, out_path: Path,
         ax.text(0, 0.03, note, fontsize=10, color="crimson", weight="bold")
     figs.append(fig)
 
-    # ---- one section per slot
+    # ---- one section per slot: ONE COMPOUND PER ROW
+    # A grid packed the caption under each cell, where a two-line score block
+    # and the next row's title ran into each other. One row per compound gives
+    # the text a full page width and cannot collide.
     for slot in results:
         prods = [s for s in slot.suggestions if s.product]
         if not prods:
             continue
-        rows = (len(prods) + per_row - 1) // per_row
-        # Generous vertical room: each product carries a two-line score caption
-        # BELOW its axes, which collides with the next row's title if the grid
-        # is packed tight.
-        fig = plt.figure(figsize=(4.8 * per_row, 4.9 * rows + 3.0))
-        gs = fig.add_gridspec(rows + 1, per_row,
-                              height_ratios=[1.6] + [1] * rows,
-                              hspace=0.55, wspace=0.10)
+        n = len(prods)
+        fig = plt.figure(figsize=(11.5, 2.4 * n + 3.4))
+        gs = fig.add_gridspec(n + 1, 2, width_ratios=[1.5, 2.0],
+                              height_ratios=[2.3] + [1] * n,
+                              hspace=0.42, wspace=0.02)
 
         head = fig.add_subplot(gs[0, :]); head.axis("off")
         if parent is not None:
             head.imshow(np.asarray(_highlight_png(
-                parent, slot.core_atoms, slot.rgroup_atoms, (900, 380))),
+                parent, slot.core_atoms, slot.rgroup_atoms, (1150, 420))),
                 extent=(0, 1, 0, 1), aspect="auto")
         head.set_title(
             f"decomposition {slot.decomp_index}, slot {slot.slot_index}"
             f"      core (blue) {slot.core_smiles or '?'}"
             f"      replacing (orange) {slot.original_rgroup}",
-            fontsize=11, loc="left")
+            fontsize=10, loc="left")
 
-        for k, s in enumerate(prods):
-            ax = fig.add_subplot(gs[1 + k // per_row, k % per_row])
-            ax.axis("off")
-            m = Chem.MolFromSmiles(s.product)
+        for k, s_ in enumerate(prods):
+            axm = fig.add_subplot(gs[1 + k, 0]); axm.axis("off")
+            m = Chem.MolFromSmiles(s_.product)
             if m is not None:
-                ax.imshow(np.asarray(_highlight_png(m, [], [], (520, 380))))
-            row = by_product.get(s.product, {})
-            ax.set_title(f"#{s.rank}  {s.smiles}   score {s.score:+.2f}",
-                         fontsize=9, loc="left")
-            ax.text(0, -0.10, _score_caption(row) if row else "",
-                    transform=ax.transAxes, fontsize=8, family="monospace",
-                    va="top")
+                axm.imshow(np.asarray(_highlight_png(m, [], [], (720, 500))))
+            axt = fig.add_subplot(gs[1 + k, 1]); axt.axis("off")
+            row = {}
+            if table is not None and len(table):
+                hit = table[table["product"] == s_.product]
+                if len(hit):
+                    row = hit.iloc[0].to_dict()
+            axt.text(0.0, 0.96,
+                     f"#{s_.rank}   {s_.smiles}"
+                     f"{'   [novel]' if s_.is_novel else ''}",
+                     transform=axt.transAxes, fontsize=10, va="top",
+                     family="monospace", weight="bold")
+            axt.text(0.0, 0.70, f"score {s_.score:+.2f}",
+                     transform=axt.transAxes, fontsize=9, va="top",
+                     family="monospace")
+            axt.text(0.0, 0.50, _score_caption(row) if row else "",
+                     transform=axt.transAxes, fontsize=9, va="top",
+                     family="monospace")
+            axt.text(0.0, 0.06, s_.product, transform=axt.transAxes,
+                     fontsize=7.5, va="top", family="monospace", color="#666666",
+                     wrap=True)
         figs.append(fig)
 
     # ---- docked poses, best-scoring first
