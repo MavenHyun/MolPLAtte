@@ -302,11 +302,91 @@ def _score_caption(row) -> str:
             f"{'   NOVEL' if row.get('is_novel') else ''}")
 
 
+def _pose_png(sdf_path, receptor_atoms=None, size=(6.6, 5.0), contact=6.0):
+    """3D depiction of a docked pose with its contacting pocket atoms.
+
+    Matplotlib rather than PyMOL/py3Dmol: py3Dmol renders to HTML/JS, which a
+    PDF page cannot embed, and PyMOL is not installed.
+
+    The pose is ROTATED INTO ITS OWN PRINCIPAL FRAME before drawing. A docked
+    ligand sits at an arbitrary orientation in crystal coordinates, and a fixed
+    camera catches most of them edge-on -- a flat aromatic system then reads as
+    a line. Aligning the two largest principal axes to the screen plane shows
+    the molecule face-on every time, without hand-tuning a view per compound.
+    """
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from rdkit import Chem
+
+    supp = Chem.SDMolSupplier(str(sdf_path), removeHs=False, sanitize=False)
+    mol = next(iter(supp), None)
+    if mol is None or mol.GetNumConformers() == 0:
+        return None
+    P = mol.GetConformer().GetPositions()
+    heavy = [a.GetIdx() for a in mol.GetAtoms() if a.GetAtomicNum() > 1]
+    if len(heavy) < 3:
+        return None
+
+    C = P[heavy]
+    centre = C.mean(0)
+    # Principal axes of the HEAVY atoms only; hydrogens would tilt the frame.
+    _, _, Vt = np.linalg.svd(C - centre, full_matrices=False)
+    P = (P - centre) @ Vt.T
+    C = P[heavy]
+
+    ELEM = {6: ("#333333", 90), 7: ("#2c5aa0", 120), 8: ("#c0392b", 120),
+            16: ("#b8860b", 150), 9: ("#27ae60", 100), 17: ("#27ae60", 130),
+            35: ("#8b4513", 160)}
+
+    fig = plt.figure(figsize=size)
+    ax = fig.add_subplot(111, projection="3d")
+
+    if receptor_atoms is not None and len(receptor_atoms):
+        R = (np.asarray(receptor_atoms) - centre) @ Vt.T
+        d = np.linalg.norm(R[:, None, :] - C[None, :, :], axis=2).min(1)
+        near = R[d < contact]
+        if len(near):
+            ax.scatter(near[:, 0], near[:, 1], near[:, 2], s=26, c="#7d9ec0",
+                       alpha=0.42, linewidths=0, depthshade=False)
+
+    for b in mol.GetBonds():
+        i, j = b.GetBeginAtomIdx(), b.GetEndAtomIdx()
+        if mol.GetAtomWithIdx(i).GetAtomicNum() == 1 or \
+           mol.GetAtomWithIdx(j).GetAtomicNum() == 1:
+            continue
+        ax.plot(*zip(P[i], P[j]), c="#2b2b2b", lw=3.4, solid_capstyle="round",
+                zorder=3)
+    for idx in heavy:
+        col, sz = ELEM.get(mol.GetAtomWithIdx(idx).GetAtomicNum(), ("#7f5fa0", 110))
+        ax.scatter(*P[idx], s=sz, c=col, depthshade=False, linewidths=0, zorder=4)
+
+    # Frame on the ligand, not on the ligand+pocket cloud, and keep the two
+    # in-plane axes equal so the depiction is not stretched.
+    # np.ptp(): ndarray.ptp() was removed in numpy 2.0
+    half = max(np.ptp(C[:, 0]), np.ptp(C[:, 1])) / 2 + 1.8
+    ax.set_xlim(-half, half); ax.set_ylim(-half, half)
+    ax.set_zlim(C[:, 2].min() - 2.5, C[:, 2].max() + 2.5)
+    ax.set_axis_off()
+    try:
+        ax.set_box_aspect((1, 1, 0.55))
+    except Exception:  # noqa: BLE001 - older matplotlib
+        pass
+    # After PCA alignment the molecule's plane IS the xy plane, so a steep
+    # elevation looks nearly down onto it: face-on, with just enough tilt left
+    # to read depth. `ax.dist` is deprecated, so the crop comes from filling
+    # the axes rather than moving the camera.
+    ax.view_init(elev=66, azim=-72)
+    ax.set_position([0.0, -0.10, 1.0, 1.06])
+    return fig
+
+
 def render_gallery(results, input_smiles: str, out_path: Path,
                    flavor_condition: Sequence[str] = (),
                    per_row: int = 3, note: str = "",
                    reference: Optional[Dict[str, Optional[float]]] = None,
-                   table=None) -> Optional[Path]:
+                   table=None, poses: Optional[Dict[str, Path]] = None,
+                   receptor_atoms=None) -> Optional[Path]:
     """One section per (decomposition, slot).
 
     Each opens with the parent molecule showing which atoms are the CORE and
@@ -387,6 +467,34 @@ def render_gallery(results, input_smiles: str, out_path: Path,
                     transform=ax.transAxes, fontsize=8, family="monospace",
                     va="top")
         figs.append(fig)
+
+    # ---- docked poses, best-scoring first
+    if poses:
+        order = (list(table["product"]) if table is not None and len(table)
+                 else list(poses))
+        shown = 0
+        for prod in order:
+            sdf = poses.get(prod)
+            if not sdf or not Path(sdf).is_file() or shown >= 6:
+                continue
+            fig = _pose_png(sdf, receptor_atoms)
+            if fig is None:
+                continue
+            row = {}
+            if table is not None and len(table):
+                hit = table[table["product"] == prod]
+                if len(hit):
+                    row = hit.iloc[0].to_dict()
+            v = row.get("vina_score")
+            dv = row.get("dvina")
+            fig.suptitle(
+                f"docked pose   {prod}\n"
+                + (f"vina {v:+.2f} kcal/mol" if v is not None else "")
+                + (f"   ({dv:+.2f} vs input)" if dv is not None else "")
+                + "   pocket atoms within 6 A in blue",
+                fontsize=9, x=0.02, ha="left")
+            figs.append(fig)
+            shown += 1
 
     if not figs:
         return None
@@ -489,6 +597,8 @@ def run_lead_optimization(input_compound, lead_optimizer, flavor_condition,
     # --- AutoDock Vina against the receptor that supplied the pocket
     vina_map = None
     redock = None
+    pose_files = None
+    receptor_atoms = None
     if dock:
         if receptor is None:
             raise ValueError(
@@ -511,8 +621,12 @@ def run_lead_optimization(input_compound, lead_optimizer, flavor_condition,
             products = [s.product for sl in results for s in sl.suggestions
                         if s.product]
             poses = Path(pose_dir) if pose_dir else None
-            vina_map = docker.dock_many(sorted(set(products + [smiles])),
-                                        pose_dir=poses)
+            targets = sorted(set(products + [smiles]))
+            vina_map = docker.dock_many(targets, pose_dir=poses)
+            if poses:
+                pose_files = {s: poses / f"pose_{i:03d}.sdf"
+                              for i, s in enumerate(targets)}
+            receptor_atoms = getattr(docker, "_pocket_atoms", None)
             reference["vina_score"] = vina_map.get(smiles)
         except DockingUnavailable as exc:
             import warnings
@@ -528,7 +642,9 @@ def run_lead_optimization(input_compound, lead_optimizer, flavor_condition,
             note = "POCKET SUPPLIED BUT INERT -- ranking identical without it"
         gallery_path = render_gallery(results, smiles, Path(gallery),
                                       flavor_condition=labels, note=note,
-                                      reference=reference, table=table)
+                                      reference=reference, table=table,
+                                      poses=pose_files,
+                                      receptor_atoms=receptor_atoms)
 
     return LeadOptimizationReport(
         input_smiles=smiles, flavor_condition=labels, reference=reference,

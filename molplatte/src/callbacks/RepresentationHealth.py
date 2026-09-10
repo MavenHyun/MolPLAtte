@@ -493,8 +493,27 @@ class RepresentationHealth(pl.Callback):
                 _tier("structural", lambda: self._layerwise(enc, graph))
                 _tier("collapse",   lambda: self._embedding_collapse(batch))
             if self._should_run_jacobian(trainer):
-                _tier("intra_dilution", lambda: self._intra_dilution(enc, graph))
-                _tier("inter_squash",   lambda: self._inter_and_squash(enc, graph))
+                # Lightning runs `test` inside torch.inference_mode, where
+                # jacrev cannot build a graph. Left alone the tiers do not
+                # raise -- they return ZEROS, which log as intra-H 0.000 and
+                # dilution_inter 1.000 and read exactly like a measurement of a
+                # fully degenerate representation. The same checkpoint on the
+                # same corpus reports 0.987 / 0.221 from the validation loop.
+                # So: re-enable grad, and if that is impossible say so rather
+                # than emit a number.
+                if torch.is_inference_mode_enabled():
+                    log.warning(
+                        "[RepresentationHealth] Jacobian tiers SKIPPED: running "
+                        "under torch.inference_mode (trainer.test), where "
+                        "jacrev silently yields zeros. Structural metrics below "
+                        "are unaffected; dilution/over-squashing are NOT "
+                        "reported rather than reported as zero.")
+                else:
+                    with torch.enable_grad():
+                        _tier("intra_dilution",
+                              lambda: self._intra_dilution(enc, graph))
+                        _tier("inter_squash",
+                              lambda: self._inter_and_squash(enc, graph))
             _tier("scores", lambda: self._headline_scores(metrics))
         finally:
             if was_training:

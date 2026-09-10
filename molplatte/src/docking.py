@@ -103,6 +103,7 @@ class VinaDocker:
     exhaustiveness: int = 8
     _vina: object = None
     _xtal: Optional[np.ndarray] = None
+    _pocket_atoms: Optional[np.ndarray] = None
 
     # ---------------------------------------------------------------- build
     @classmethod
@@ -166,6 +167,13 @@ class VinaDocker:
                   box_size=tuple(map(float, size)),
                   exhaustiveness=exhaustiveness)
         obj._xtal = xtal
+        # Receptor heavy atoms near the site, for drawing the pose in context.
+        try:
+            near = st.select(f"protein and not hydrogen and within 12 of somepoint",
+                             somepoint=lig)
+            obj._pocket_atoms = near.getCoords() if near is not None else None
+        except Exception:  # noqa: BLE001
+            obj._pocket_atoms = None
         return obj
 
     def _engine(self):
