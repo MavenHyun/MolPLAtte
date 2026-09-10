@@ -175,7 +175,8 @@ SPEC_KEYS = ("MW", "logP", "QED", "SAScore", "NPScore")
 
 def build_tables(results, input_smiles: str,
                  reference: Optional[Dict[str, Optional[float]]] = None,
-                 vina: Optional[Dict[str, Optional[float]]] = None):
+                 vina: Optional[Dict[str, Optional[float]]] = None,
+                 retro: Optional[Dict[str, dict]] = None):
     """Deduplicated product table plus the assembly failures.
 
     ``reference`` is the INPUT compound's specs. When given, each product also
@@ -215,6 +216,12 @@ def build_tables(results, input_smiles: str,
                     aromaticity_kept=s.aromaticity_kept,
                     is_input=(s.product == input_smiles),
                     **molecule_scores(s.product))
+                if retro is not None:
+                    r_ = retro.get(s.product) or {}
+                    keep["retro_solved"] = r_.get("solved")
+                    keep["retro_steps"] = r_.get("n_steps")
+                    keep["retro_score"] = r_.get("score")
+                    keep["retro_routes"] = r_.get("n_solved_routes")
                 if vina is not None:
                     keep["vina_score"] = vina.get(s.product)
                     ref_v = (reference or {}).get("vina_score")
@@ -254,6 +261,8 @@ def build_tables(results, input_smiles: str,
             "SAScore", "NPScore"]
     if vina is not None:
         cols += ["vina_score", "dvina"]
+    if retro is not None:
+        cols += ["retro_solved", "retro_steps", "retro_routes", "retro_score"]
     if reference:
         cols += [f"d{k}" for k in SPEC_KEYS]
     cols += ["is_novel", "corpus_count", "aromaticity_kept", "is_input",
@@ -324,6 +333,13 @@ def _score_caption(row) -> str:
         lines.append(f"vina {row['vina_score']:+.2f} kcal/mol"
                      + (f"  ({row['dvina']:+.2f} vs input)"
                         if row.get("dvina") is not None else ""))
+    if row.get("retro_solved") is not None:
+        st = row.get("retro_steps")
+        nr = row.get("retro_routes")
+        lines.append("retro " + ("route found" if row["retro_solved"]
+                                 else "NO ROUTE FOUND")
+                     + (f", {int(st)} steps" if st else "")
+                     + (f", {int(nr)} solved routes" if nr else ""))
     return "\n".join(lines)
 
 
@@ -615,6 +631,8 @@ def run_lead_optimization(input_compound, lead_optimizer, flavor_condition,
                           receptor: Optional[str | Path] = None,
                           dock: bool = False,
                           exhaustiveness: int = 8,
+                          retro: bool = False,
+                          retro_timeout: int = 3600,
                           ligand_resname: Optional[str] = None,
                           ligand_resname_smiles: Optional[str] = None,
                           pose_dir: Optional[str | Path] = None
@@ -727,7 +745,30 @@ def run_lead_optimization(input_compound, lead_optimizer, flavor_condition,
             warnings.warn(f"docking skipped: {exc}", RuntimeWarning, stacklevel=2)
             vina_map = None
 
-    table, failures = build_tables(results, smiles, reference, vina_map)
+    # --- retrosynthesis, on the SAME set of unique products
+    retro_map = None
+    if retro:
+        from retrosynthesis import plan_routes, retro_available, why_unavailable
+
+        if not retro_available():
+            import warnings
+
+            warnings.warn(f"retrosynthesis skipped: {why_unavailable()}",
+                          RuntimeWarning, stacklevel=2)
+        else:
+            products = [s.product for sl in results for s in sl.suggestions
+                        if s.product]
+            # The input goes in too, so `retro_solved` on the recovered parent
+            # is a sanity anchor: a compound that came out of a real complex
+            # ought to be reachable.
+            retro_map = plan_routes(sorted(set(products + [smiles])),
+                                    timeout=retro_timeout)
+            r_in = retro_map.get(smiles) or {}
+            reference["retro_solved"] = r_in.get("solved")
+            reference["retro_steps"] = r_in.get("n_steps")
+
+    table, failures = build_tables(results, smiles, reference, vina_map,
+                                   retro_map)
     gallery_path = None
     if gallery:
         note = ""

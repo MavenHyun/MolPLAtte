@@ -215,3 +215,54 @@ def test_replaced_atoms_is_sorted_and_stable():
                         rgroup_atoms=(22, 21, 12))]
     table, _ = build_tables(results, "PARENT")
     assert table.iloc[0]["replaced_atoms"] == "12,21,22"
+
+
+# --------------------------------------------------------------------------
+# Retrosynthesis columns
+# --------------------------------------------------------------------------
+
+def test_retro_columns_absent_unless_requested():
+    from lead_report import build_tables
+
+    results = [FakeSlot(0, 0, "core", "CO",
+                        [FakeSuggestion(1, 1.0, "*O", product="CCO")])]
+    table, _ = build_tables(results, "PARENT")
+    for col in ("retro_solved", "retro_steps", "retro_routes"):
+        assert col not in table.columns
+
+
+def test_retro_columns_carry_the_search_result():
+    """Including the case that matters: an UNSOLVED molecule.
+
+    SAScore only ever says "harder"; a route search can say "none found", and
+    that distinction is the reason this column exists.
+    """
+    from lead_report import build_tables
+
+    made = "CCO"
+    unmade = "CCN"
+    results = [FakeSlot(0, 0, "core", "CO", [
+        FakeSuggestion(1, 9.0, "*O", product=made),
+        FakeSuggestion(2, 8.0, "*N", product=unmade),
+    ])]
+    retro = {
+        made:   {"solved": True,  "n_steps": 2, "score": 0.99, "n_solved_routes": 9},
+        unmade: {"solved": False, "n_steps": 6, "score": None, "n_solved_routes": 0},
+    }
+    table, _ = build_tables(results, "PARENT", None, None, retro)
+    rows = {r["product"]: r for r in table.to_dict("records")}
+    assert rows[made]["retro_solved"] is True
+    assert rows[made]["retro_steps"] == 2 and rows[made]["retro_routes"] == 9
+    assert rows[unmade]["retro_solved"] is False
+    assert rows[unmade]["retro_routes"] == 0, "unsolved must report zero routes"
+
+
+def test_retro_missing_molecule_does_not_break_the_row():
+    """A molecule the search never reached must not drop its row."""
+    from lead_report import build_tables
+
+    results = [FakeSlot(0, 0, "core", "CO",
+                        [FakeSuggestion(1, 1.0, "*O", product="CCO")])]
+    table, _ = build_tables(results, "PARENT", None, None, {})
+    assert len(table) == 1
+    assert table.iloc[0]["retro_solved"] is None
