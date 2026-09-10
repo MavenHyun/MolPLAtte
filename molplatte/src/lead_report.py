@@ -205,6 +205,12 @@ def build_tables(results, input_smiles: str,
                     rank=s.rank, decomposition=slot.decomp_index,
                     slot=slot.slot_index, core=slot.core_smiles,
                     replaced=slot.original_rgroup,
+                    # Parent-molecule atom indices of the group being replaced.
+                    # `replaced` alone cannot tell two sites apart when they are
+                    # chemically identical -- a tetramethoxyflavone shows "CO"
+                    # for four different methoxy groups. These can.
+                    replaced_atoms=",".join(
+                        str(i) for i in sorted(getattr(slot, "rgroup_atoms", ()) or ())),
                     corpus_count=s.corpus_count, is_novel=bool(s.is_novel),
                     aromaticity_kept=s.aromaticity_kept,
                     is_input=(s.product == input_smiles),
@@ -238,7 +244,7 @@ def build_tables(results, input_smiles: str,
     if reference:
         cols += [f"d{k}" for k in SPEC_KEYS]
     cols += ["is_novel", "corpus_count", "aromaticity_kept", "is_input",
-             "n_slots", "found_in_slots", "core", "replaced",
+             "n_slots", "found_in_slots", "core", "replaced", "replaced_atoms",
              "decomposition", "slot", "rank"]
     table = pd.DataFrame(rows, columns=cols) if rows else pd.DataFrame(columns=cols)
     failures = pd.DataFrame(fails) if fails else pd.DataFrame(
@@ -499,7 +505,8 @@ def render_gallery(results, input_smiles: str, out_path: Path,
         head.set_title(
             f"decomposition {slot.decomp_index}, slot {slot.slot_index}"
             f"      core (blue) {slot.core_smiles or '?'}"
-            f"      replacing (orange) {slot.original_rgroup}",
+            f"      replacing (orange) {slot.original_rgroup}"
+            f"  @ atoms {','.join(str(i) for i in sorted(getattr(slot, 'rgroup_atoms', ()) or ()))}",
             fontsize=10, loc="left")
 
         for k, s_ in enumerate(prods):

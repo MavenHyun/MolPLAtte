@@ -38,6 +38,10 @@ class FakeSlot:
     core_smiles: str
     original_rgroup: str
     suggestions: List[FakeSuggestion] = field(default_factory=list)
+    # Mirrors the real SlotResult. Omitting it is how a table column that reads
+    # it broke seven tests at once -- which is the fixture earning its keep.
+    core_atoms: tuple = ()
+    rgroup_atoms: tuple = ()
 
 
 def test_same_product_from_two_slots_is_one_compound():
@@ -152,3 +156,37 @@ def test_delta_columns_absent_without_a_reference():
                         [FakeSuggestion(1, 5.0, "*O", product="CCO")])]
     table, _ = build_tables(results, "CCC")
     assert "dMW" not in table.columns
+
+
+def test_replaced_atoms_disambiguates_identical_rgroups():
+    """Two chemically identical groups at different sites.
+
+    `replaced` is the same SMILES for both -- that is the whole reason the atom
+    indices are a column. A tetramethoxyflavone shows "CO" four times, and only
+    the site tells them apart.
+    """
+    from lead_report import build_tables
+
+    results = [
+        FakeSlot(0, 0, "core", "CO", [FakeSuggestion(1, 9.0, "*OCC",
+                                                     product="CCOc1ccccc1")],
+                 rgroup_atoms=(12, 13)),
+        FakeSlot(0, 1, "core", "CO", [FakeSuggestion(1, 8.0, "*OCC",
+                                                     product="CCOc1ccccc1O")],
+                 rgroup_atoms=(21, 22)),
+    ]
+    table, _ = build_tables(results, "PARENT")
+    assert len(table) == 2
+    assert set(table["replaced"]) == {"CO"}, "the SMILES cannot distinguish them"
+    assert set(table["replaced_atoms"]) == {"12,13", "21,22"}, \
+        "the atom indices must"
+
+
+def test_replaced_atoms_is_sorted_and_stable():
+    from lead_report import build_tables
+
+    results = [FakeSlot(0, 0, "core", "CO",
+                        [FakeSuggestion(1, 1.0, "*O", product="CCO")],
+                        rgroup_atoms=(22, 21, 12))]
+    table, _ = build_tables(results, "PARENT")
+    assert table.iloc[0]["replaced_atoms"] == "12,21,22"
