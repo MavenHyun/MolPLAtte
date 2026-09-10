@@ -522,7 +522,9 @@ def render_gallery(results, input_smiles: str, out_path: Path,
         if not prods:
             continue
         n = len(prods)
-        fig = plt.figure(figsize=(11.5, 2.4 * n + 3.4))
+        # Rows grow with the caption: five lines with docking + retrosynthesis
+        # against three without.
+        fig = plt.figure(figsize=(11.5, 2.9 * n + 3.4))
         gs = fig.add_gridspec(n + 1, 2, width_ratios=[1.5, 2.0],
                               height_ratios=[2.3] + [1] * n,
                               hspace=0.42, wspace=0.02)
@@ -550,20 +552,22 @@ def render_gallery(results, input_smiles: str, out_path: Path,
                 hit = table[table["product"] == s_.product]
                 if len(hit):
                     row = hit.iloc[0].to_dict()
-            axt.text(0.0, 0.96,
+            # ONE top-anchored block, not three at fixed y. The caption grows
+            # a line when docking or retrosynthesis is on, and absolute
+            # positions cannot survive that -- the retro line landed on top of
+            # the SMILES the first time this ran with retro=True.
+            axt.text(0.0, 0.97,
                      f"#{s_.rank}   {s_.smiles}"
                      f"{'   [novel]' if s_.is_novel else ''}",
                      transform=axt.transAxes, fontsize=10, va="top",
                      family="monospace", weight="bold")
-            axt.text(0.0, 0.70, f"score {s_.score:+.2f}",
-                     transform=axt.transAxes, fontsize=9, va="top",
-                     family="monospace")
-            axt.text(0.0, 0.50, _score_caption(row) if row else "",
-                     transform=axt.transAxes, fontsize=9, va="top",
-                     family="monospace")
-            axt.text(0.0, 0.06, s_.product, transform=axt.transAxes,
-                     fontsize=7.5, va="top", family="monospace", color="#666666",
-                     wrap=True)
+            body = f"score {s_.score:+.2f}\n" + (
+                _score_caption(row) if row else "")
+            axt.text(0.0, 0.80, body, transform=axt.transAxes, fontsize=9,
+                     va="top", family="monospace", linespacing=1.55)
+            axt.text(0.0, 0.02, s_.product, transform=axt.transAxes,
+                     fontsize=7.5, va="bottom", family="monospace",
+                     color="#666666")
         figs.append(fig)
 
     # ---- docked poses, best-scoring first
