@@ -84,7 +84,12 @@ class SaveBestModelCheckpoint(pl.Callback):
                 head = getattr(cfg, "assembly_head", None)
                 if head:
                     kw["assembly_head"] = head
+                # use_basis belongs IN model_kwargs -- it is needed to BUILD
+                # the module. The path is recorded alongside for provenance
+                # only; the basis itself is in the checkpoint.
                 basis = getattr(cfg, "pocket_basis_path", None)
+                if basis:
+                    kw["use_basis"] = True
                 write_sidecar(self.save_path, kw,
                               monitor=self.monitor, value=current,
                               pocket_basis_path=basis)

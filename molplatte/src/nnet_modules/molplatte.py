@@ -107,6 +107,10 @@ class MolPLAtteConfig:
     #: is what 243 tastepocket records can actually support. MUST be the basis
     #: fitted WITHOUT the fold being scored, or the evaluation leaks.
     pocket_basis_path: Optional[str] = None
+    #: Build the frozen-PCA reduction WITHOUT reading the basis file: the basis
+    #: is a buffer saved in the checkpoint, so a reload only needs the shape.
+    #: Set automatically by checkpoint_spec.infer_model_kwargs.
+    use_basis: bool = False
 
     #: Assembly head -- recovers the chemistry masking destroyed at each joint,
     #: which is what turns "retrieve this R-group" into "attach it like this".
@@ -202,6 +206,7 @@ class MolPLAtte(nn.Module):
             dropout=c.dropout_rate,
             pocket_dropout=c.pocket_dropout,
             basis_path=c.pocket_basis_path,
+            use_basis=c.use_basis,
         )
         self.nnet["query_projector"] = getattr(projector_registry, c.query_projector)(
             **c.query_projector_kwargs

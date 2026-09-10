@@ -91,6 +91,7 @@ class PocketConditioning(nn.Module):
         dropout: float = 0.1,
         pocket_dropout: float = 0.0,
         basis_path: Optional[str] = None,
+        use_basis: bool = False,
     ) -> None:
         super().__init__()
         if flavor_dim < 0 or pocket_input_dim < 0 or pocket_dim < 0:
@@ -113,8 +114,17 @@ class PocketConditioning(nn.Module):
             self.project = None
             return
 
-        if basis_path:
-            self._load_basis(basis_path)
+        # `use_basis` without a path builds the SAME shape with empty buffers,
+        # to be filled by load_state_dict. The basis is saved in the checkpoint,
+        # so reloading a basis-reduced model must not require the .npz that
+        # produced it -- that file is a training artefact, not a runtime one.
+        if basis_path or use_basis:
+            if basis_path:
+                self._load_basis(basis_path)
+            else:
+                self.basis = torch.zeros(self.pocket_dim, self.pocket_input_dim)
+                self.basis_mean = torch.zeros(self.pocket_input_dim)
+                self.basis_scale = torch.ones(self.pocket_dim)
             # Learned part is the adapter ALONE; the basis is a buffer, so it is
             # neither trained nor perturbed by a warm start.
             out = nn.Linear(self.pocket_dim, self.pocket_dim)

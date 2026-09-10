@@ -117,6 +117,10 @@ def infer_model_kwargs(state_dict: Dict,
 
     p_in, p_out = _pocket_dims(sd)
     if p_in is not None:
+        if "nnet.pocket_conditioning.basis" in sd:
+            # A frozen-PCA reduction. The basis rides in the checkpoint, so the
+            # module is built empty-buffered and filled by load_state_dict.
+            kw["use_basis"] = True
         flavor = query_cond - p_out
         if flavor < 0:
             raise ValueError(
