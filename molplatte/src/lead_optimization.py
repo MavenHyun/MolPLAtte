@@ -640,7 +640,15 @@ def pocket_embedding_from_structure(
     residues = [(r.getChid(), int(r.getResnum())) for r in pocket.getHierView().iterResidues()]
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     n_prefix = verify_offset(tokenizer)
-    esm = AutoModel.from_pretrained(model_name).to(device).eval()
+    # add_pooling_layer=False: the HF checkpoint is an MLM model, so EsmModel
+    # would append a pooler the checkpoint has no weights for and initialise it
+    # RANDOMLY -- which transformers reports as "pooler.dense.weight MISSING".
+    # Harmless here only because we read last_hidden_state and never
+    # pooler_output; dropping the pooler removes the hazard instead of relying
+    # on that. Verified: last_hidden_state is bit-identical either way, so
+    # stored corpus embeddings remain valid.
+    esm = AutoModel.from_pretrained(
+        model_name, add_pooling_layer=False).to(device).eval()
 
     rows = []
     for chid in sorted({c for c, _ in residues}):

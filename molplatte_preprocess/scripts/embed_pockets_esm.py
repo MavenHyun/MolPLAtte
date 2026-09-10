@@ -94,7 +94,12 @@ def main() -> int:
     n_prefix = verify_offset(tokenizer)
     print(f"tokenizer prefix tokens: {n_prefix} (verified against a 20-mer probe)")
 
-    model = AutoModel.from_pretrained(args.model).to(device).eval()
+    # No pooler: the MLM checkpoint has no weights for one, so it would be
+    # randomly initialised. We read last_hidden_state, never pooler_output, and
+    # last_hidden_state is bit-identical with or without it -- embeddings
+    # already in the corpus stay valid.
+    model = AutoModel.from_pretrained(
+        args.model, add_pooling_layer=False).to(device).eval()
     missing = [n for n, _ in model.named_parameters() if "pooler" in n]
     if missing:
         print(f"note: {len(missing)} pooler params are randomly initialised and unused "
