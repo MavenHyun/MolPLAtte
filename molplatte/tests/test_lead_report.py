@@ -182,6 +182,31 @@ def test_replaced_atoms_disambiguates_identical_rgroups():
         "the atom indices must"
 
 
+def test_replaced_atoms_carries_every_site_when_deduped():
+    """One product reachable from two sites must name BOTH.
+
+    A symmetric molecule can give the same canonical product from different
+    positions. Keeping only the best-scoring site would report one of several
+    true answers as if it were the only one.
+    """
+    from lead_report import build_tables
+
+    same = "CCOc1ccccc1"
+    results = [
+        FakeSlot(0, 0, "core", "CO", [FakeSuggestion(1, 5.0, "*OCC", product=same)],
+                 rgroup_atoms=(21, 22)),
+        FakeSlot(0, 1, "core", "CO", [FakeSuggestion(1, 9.0, "*OCC", product=same)],
+                 rgroup_atoms=(12, 13)),
+    ]
+    table, _ = build_tables(results, "PARENT")
+    assert len(table) == 1, "one product, one row"
+    row = table.iloc[0]
+    assert row["n_slots"] == 2 and row["n_sites"] == 2
+    # sorted by position, not by which one won on score
+    assert row["replaced_atoms"] == "12,13 | 21,22"
+    assert row["retrieval_score"] == pytest.approx(9.0), "best score still wins"
+
+
 def test_replaced_atoms_is_sorted_and_stable():
     from lead_report import build_tables
 

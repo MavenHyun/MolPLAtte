@@ -197,6 +197,12 @@ def build_tables(results, input_smiles: str,
                     retrieval_score=float(s.score),
                     reason=s.product_error or "no product"))
                 continue
+            # Parent-molecule atom indices of the group being replaced.
+            # `replaced` alone cannot tell two sites apart when they are
+            # chemically identical -- a tetramethoxyflavone shows "CO" for four
+            # different methoxy groups. These can.
+            site = ",".join(str(i) for i in
+                            sorted(getattr(slot, "rgroup_atoms", ()) or ()))
             row = best.get(s.product)
             if row is None or s.score > row["retrieval_score"]:
                 keep = dict(
@@ -205,12 +211,6 @@ def build_tables(results, input_smiles: str,
                     rank=s.rank, decomposition=slot.decomp_index,
                     slot=slot.slot_index, core=slot.core_smiles,
                     replaced=slot.original_rgroup,
-                    # Parent-molecule atom indices of the group being replaced.
-                    # `replaced` alone cannot tell two sites apart when they are
-                    # chemically identical -- a tetramethoxyflavone shows "CO"
-                    # for four different methoxy groups. These can.
-                    replaced_atoms=",".join(
-                        str(i) for i in sorted(getattr(slot, "rgroup_atoms", ()) or ())),
                     corpus_count=s.corpus_count, is_novel=bool(s.is_novel),
                     aromaticity_kept=s.aromaticity_kept,
                     is_input=(s.product == input_smiles),
@@ -228,15 +228,28 @@ def build_tables(results, input_smiles: str,
                         keep[f"d{k}"] = (None if a is None or b is None
                                          else float(a) - float(b))
                 keep["found_in_slots"] = (row or {}).get("found_in_slots", set()) | {where}
+                # Sites accumulate across the dedup exactly as found_in_slots
+                # does. Keeping only the winner's site would name one of several
+                # true answers: on a symmetric molecule, replacing different
+                # positions can yield the SAME canonical product, and every one
+                # of those positions really was replaced.
+                keep["_sites"] = (row or {}).get("_sites", set()) | {site}
                 best[s.product] = keep
             else:
                 row["found_in_slots"].add(where)
+                row["_sites"].add(site)
 
     rows = sorted(best.values(), key=lambda r: -r["retrieval_score"])
     for r in rows:
         slots = sorted(r.pop("found_in_slots"))
         r["n_slots"] = len(slots)
         r["found_in_slots"] = ",".join(slots)
+        # Sorted by position so the order is stable, and joined with " | "
+        # because each site is itself a comma-separated list of atom indices.
+        sites = sorted((x for x in r.pop("_sites", set()) if x),
+                       key=lambda t: [int(i) for i in t.split(",")])
+        r["replaced_atoms"] = " | ".join(sites)
+        r["n_sites"] = len(sites)
     cols = ["product", "rgroup", "retrieval_score", "MW", "logP", "QED",
             "SAScore", "NPScore"]
     if vina is not None:
@@ -244,7 +257,8 @@ def build_tables(results, input_smiles: str,
     if reference:
         cols += [f"d{k}" for k in SPEC_KEYS]
     cols += ["is_novel", "corpus_count", "aromaticity_kept", "is_input",
-             "n_slots", "found_in_slots", "core", "replaced", "replaced_atoms",
+             "n_slots", "n_sites", "found_in_slots", "core", "replaced",
+             "replaced_atoms",
              "decomposition", "slot", "rank"]
     table = pd.DataFrame(rows, columns=cols) if rows else pd.DataFrame(columns=cols)
     failures = pd.DataFrame(fails) if fails else pd.DataFrame(
