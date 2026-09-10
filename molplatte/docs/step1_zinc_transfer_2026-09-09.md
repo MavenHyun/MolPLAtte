@@ -136,6 +136,15 @@ priors, 0.0233 vs 0.0256).
 −0.067 H@1 is roughly **20 standard errors** — nothing like the ±0.003 wobble
 above.
 
+> **Mechanism, added 2026-09-10.**
+> [representation_health_2026-09-10.md](representation_health_2026-09-10.md)
+> measures the ZINC encoder over-smoothing more than the flavour one: 41% MAD
+> decline against 33%, over-smoothing 0.407 against 0.331. A representation that
+> discriminates less at the output is a plausible mechanism for the drop below.
+> Correlation only -- one seed, and over-smoothing was never manipulated
+> independently, so it does not displace the domain-shift explanation given
+> here.
+
 **This is the opposite of catastrophic forgetting.** Twenty epochs of unfrozen
 flavour training are not erasing something valuable; they are REPAIRING a
 representation that does not fit the target domain. Held fixed, the ZINC
