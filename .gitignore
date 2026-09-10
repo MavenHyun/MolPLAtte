@@ -25,9 +25,8 @@ molplatte_preprocess/wandb/
 molplatte/notebooks/docked_poses/
 molplatte/notebooks/*.pdf
 
-# Local working-instruction files. claude_00.md is deliberately tracked and
-# published; the rest are private notes and this repo is PUBLIC. The pattern
-# covers claude_03.md and onwards without needing another edit -- the negation
-# is what keeps claude_00.md out of it.
+# Local working-instruction files: notes to the assistant, not project source.
+# None of them belong in the repo, claude_00.md included -- it was tracked by
+# mistake from the first commit and is untracked as of 2026-09-10. The pattern
+# covers claude_03.md and onwards without needing another edit.
 claude_*.md
-!claude_00.md
