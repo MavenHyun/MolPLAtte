@@ -110,3 +110,45 @@ def test_accepts_both_smiles_and_mol():
         as_mol("not a molecule %%%")
     with pytest.raises(TypeError):
         as_mol(42)
+
+
+def test_reference_specs_and_deltas():
+    """The input's own specs, and each product's change against them."""
+    from lead_report import build_tables, molecule_scores
+
+    ethanol = "CCO"
+    ref = molecule_scores(ethanol)
+    assert ref["MW"] == pytest.approx(46.069, abs=1e-2)
+
+    results = [FakeSlot(0, 0, "C", "*C",
+                        [FakeSuggestion(1, 5.0, "*O", product="CCCO")])]
+    table, _ = build_tables(results, ethanol, ref)
+    row = table.iloc[0]
+    assert row["dMW"] == pytest.approx(row["MW"] - ref["MW"])
+    assert row["dMW"] > 0, "propanol is heavier than ethanol"
+
+
+def test_recovering_the_input_gives_exactly_zero_deltas():
+    """A free correctness check: if the model returns the input compound, every
+    delta must be 0. A non-zero one means the reference and the product were
+    scored differently."""
+    from lead_report import build_tables, molecule_scores
+
+    smi = "COc1cc(C=O)ccc1O"
+    ref = molecule_scores(smi)
+    results = [FakeSlot(0, 0, "C", "*C",
+                        [FakeSuggestion(1, 5.0, "*O", product=smi)])]
+    table, _ = build_tables(results, smi, ref)
+    row = table.iloc[0]
+    for k in ("MW", "logP", "QED", "SAScore", "NPScore"):
+        assert row[f"d{k}"] == pytest.approx(0.0, abs=1e-9), f"d{k} must be 0"
+    assert bool(row["is_input"]) is True
+
+
+def test_delta_columns_absent_without_a_reference():
+    from lead_report import build_tables
+
+    results = [FakeSlot(0, 0, "C", "*C",
+                        [FakeSuggestion(1, 5.0, "*O", product="CCO")])]
+    table, _ = build_tables(results, "CCC")
+    assert "dMW" not in table.columns

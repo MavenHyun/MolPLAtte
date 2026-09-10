@@ -133,11 +133,24 @@ class LeadOptimizationReport:
     flavor_condition: List[str]
     table: "object"                      # pandas.DataFrame, deduped products
     failures: "object"                   # pandas.DataFrame, unassembled
+    #: The INPUT compound's own specs, on the same scale as the products'.
+    reference: Dict[str, Optional[float]] = field(default_factory=dict)
     compounds: List[str] = field(default_factory=list)
     gallery: Optional[Path] = None
     results: list = field(default_factory=list)
     pocket_used: bool = False
     pocket_changed_ranking: Optional[bool] = None
+
+    def reference_row(self):
+        """The input compound as a one-row DataFrame, for display beside the
+        products. Kept OUT of `.table` deliberately: it has no retrieval_score,
+        so a sorted table would have to place it arbitrarily."""
+        import pandas as pd
+
+        return pd.DataFrame([{"product": self.input_smiles,
+                              "rgroup": "(input)", "retrieval_score": None,
+                              **{k: self.reference.get(k) for k in SPEC_KEYS},
+                              "is_input": True}])
 
     def __repr__(self) -> str:  # noqa: D105
         n = len(self.compounds)
@@ -147,8 +160,20 @@ class LeadOptimizationReport:
                 f"{', pocket INERT' if self.pocket_changed_ranking is False else ''}>")
 
 
-def build_tables(results, input_smiles: str):
-    """Deduplicated product table plus the assembly failures."""
+#: Properties carried for both the input and every product, so the table can
+#: show the change a substitution made rather than only its absolute value.
+SPEC_KEYS = ("MW", "logP", "QED", "SAScore", "NPScore")
+
+
+def build_tables(results, input_smiles: str,
+                 reference: Optional[Dict[str, Optional[float]]] = None):
+    """Deduplicated product table plus the assembly failures.
+
+    ``reference`` is the INPUT compound's specs. When given, each product also
+    carries ``d<prop>`` = product - input, which is the number a chemist
+    actually reads: an absolute QED of 0.74 means little, +0.10 against the
+    starting compound means something.
+    """
     import pandas as pd
 
     best: Dict[str, dict] = {}
@@ -175,6 +200,11 @@ def build_tables(results, input_smiles: str):
                     aromaticity_kept=s.aromaticity_kept,
                     is_input=(s.product == input_smiles),
                     **molecule_scores(s.product))
+                if reference:
+                    for k in SPEC_KEYS:
+                        a, b = keep.get(k), reference.get(k)
+                        keep[f"d{k}"] = (None if a is None or b is None
+                                         else float(a) - float(b))
                 keep["found_in_slots"] = (row or {}).get("found_in_slots", set()) | {where}
                 best[s.product] = keep
             else:
@@ -186,9 +216,12 @@ def build_tables(results, input_smiles: str):
         r["n_slots"] = len(slots)
         r["found_in_slots"] = ",".join(slots)
     cols = ["product", "rgroup", "retrieval_score", "MW", "logP", "QED",
-            "SAScore", "NPScore", "is_novel", "corpus_count",
-            "aromaticity_kept", "is_input", "n_slots", "found_in_slots",
-            "core", "replaced", "decomposition", "slot", "rank"]
+            "SAScore", "NPScore"]
+    if reference:
+        cols += [f"d{k}" for k in SPEC_KEYS]
+    cols += ["is_novel", "corpus_count", "aromaticity_kept", "is_input",
+             "n_slots", "found_in_slots", "core", "replaced",
+             "decomposition", "slot", "rank"]
     table = pd.DataFrame(rows, columns=cols) if rows else pd.DataFrame(columns=cols)
     failures = pd.DataFrame(fails) if fails else pd.DataFrame(
         columns=["decomposition", "slot", "rank", "rgroup",
@@ -198,7 +231,9 @@ def build_tables(results, input_smiles: str):
 
 def render_gallery(results, input_smiles: str, out_path: Path,
                    flavor_condition: Sequence[str] = (),
-                   per_row: int = 4, note: str = "") -> Optional[Path]:
+                   per_row: int = 4, note: str = "",
+                   reference: Optional[Dict[str, Optional[float]]] = None
+                   ) -> Optional[Path]:
     """One section per (decomposition, slot): the core, then its products.
 
     Written as a PDF when the suffix says so, otherwise PNG. Returns None rather
@@ -234,7 +269,12 @@ def render_gallery(results, input_smiles: str, out_path: Path,
         return fig
 
     figs = []
-    head = panel([input_smiles], [f"INPUT  {input_smiles}"],
+    spec = ""
+    if reference:
+        spec = "   ".join(f"{k} {v:.2f}" for k, v in reference.items()
+                          if v is not None)
+    head = panel([input_smiles],
+                 [f"INPUT  {input_smiles}" + (f"\n{spec}" if spec else "")],
                  f"Input compound   flavor={list(flavor_condition) or 'none'}"
                  + (f"\n{note}" if note else ""))
     if head is not None:
@@ -313,18 +353,20 @@ def run_lead_optimization(input_compound, lead_optimizer, flavor_condition,
                 "this result as flavour-conditioned only.",
                 RuntimeWarning, stacklevel=2)
 
-    table, failures = build_tables(results, smiles)
+    reference = molecule_scores(smiles)
+    table, failures = build_tables(results, smiles, reference)
     gallery_path = None
     if gallery:
         note = ""
         if changed is False:
             note = "POCKET SUPPLIED BUT INERT -- ranking identical without it"
         gallery_path = render_gallery(results, smiles, Path(gallery),
-                                      flavor_condition=labels, note=note)
+                                      flavor_condition=labels, note=note,
+                                      reference=reference)
 
     return LeadOptimizationReport(
-        input_smiles=smiles, flavor_condition=labels, table=table,
-        failures=failures,
+        input_smiles=smiles, flavor_condition=labels, reference=reference,
+        table=table, failures=failures,
         compounds=[p for p in table["product"].tolist()] if len(table) else [],
         gallery=gallery_path, results=results,
         pocket_used=pocket_condition is not None,
