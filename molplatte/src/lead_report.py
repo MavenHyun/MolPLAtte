@@ -229,16 +229,72 @@ def build_tables(results, input_smiles: str,
     return table, failures
 
 
+def _highlight_png(mol, core_atoms, rgroup_atoms, size=(560, 420)):
+    """Parent depiction with the CORE and the R-GROUP BEING REPLACED coloured.
+
+    This is the picture that explains a decomposition: which part is held
+    fixed, and which part the model is proposing replacements for. Bonds
+    internal to each set are coloured too, otherwise only the atoms read as
+    highlighted and the split is hard to see at a glance.
+    """
+    from rdkit.Chem.Draw import rdMolDraw2D
+
+    core = set(core_atoms or ())
+    rgrp = set(rgroup_atoms or ())
+    CORE_C, RG_C = (0.68, 0.85, 0.90), (1.00, 0.72, 0.60)
+    atom_cols = {i: CORE_C for i in core}
+    atom_cols.update({i: RG_C for i in rgrp})
+
+    bonds, bond_cols = [], {}
+    for b in mol.GetBonds():
+        i, j = b.GetBeginAtomIdx(), b.GetEndAtomIdx()
+        col = CORE_C if (i in core and j in core) else (
+            RG_C if (i in rgrp and j in rgrp) else None)
+        if col is not None:
+            bonds.append(b.GetIdx())
+            bond_cols[b.GetIdx()] = col
+
+    d = rdMolDraw2D.MolDraw2DCairo(*size)
+    d.drawOptions().useBWAtomPalette()
+    rdMolDraw2D.PrepareAndDrawMolecule(
+        d, mol, highlightAtoms=list(atom_cols), highlightAtomColors=atom_cols,
+        highlightBonds=bonds, highlightBondColors=bond_cols)
+    d.FinishDrawing()
+    import io
+
+    from PIL import Image
+    return Image.open(io.BytesIO(d.GetDrawingText()))
+
+
+def _score_caption(row) -> str:
+    """Every score, on two lines, with the delta against the input."""
+    def f(key, fmt="{:.2f}"):
+        v = row.get(key)
+        return "n/a" if v is None else fmt.format(v)
+
+    def d(key, fmt="{:+.2f}"):
+        v = row.get("d" + key)
+        return "" if v is None else f" ({fmt.format(v)})"
+
+    return (f"MW {f('MW','{:.1f}')}{d('MW','{:+.1f}')}   "
+            f"logP {f('logP')}{d('logP')}   QED {f('QED')}{d('QED')}\n"
+            f"SA {f('SAScore')}{d('SAScore')}   "
+            f"NP {f('NPScore')}{d('NPScore')}   "
+            f"count {int(row.get('corpus_count') or 0):,}"
+            f"{'   NOVEL' if row.get('is_novel') else ''}")
+
+
 def render_gallery(results, input_smiles: str, out_path: Path,
                    flavor_condition: Sequence[str] = (),
-                   per_row: int = 4, note: str = "",
-                   reference: Optional[Dict[str, Optional[float]]] = None
-                   ) -> Optional[Path]:
-    """One section per (decomposition, slot): the core, then its products.
+                   per_row: int = 3, note: str = "",
+                   reference: Optional[Dict[str, Optional[float]]] = None,
+                   table=None) -> Optional[Path]:
+    """One section per (decomposition, slot).
 
-    Written as a PDF when the suffix says so, otherwise PNG. Returns None rather
-    than raising if the drawing stack is unavailable -- a missing picture should
-    not cost the caller their table.
+    Each opens with the parent molecule showing which atoms are the CORE and
+    which are the R-group being replaced, then the products with every score
+    beneath them. `table` supplies the scores; without it the captions fall
+    back to the retrieval score alone.
     """
     try:
         import matplotlib
@@ -250,58 +306,81 @@ def render_gallery(results, input_smiles: str, out_path: Path,
 
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
-
-    def panel(smiles_list, legends, title):
-        mols = [Chem.MolFromSmiles(s) for s in smiles_list]
-        keep = [(m, l) for m, l in zip(mols, legends) if m is not None]
-        if not keep:
-            return None
-        img = Draw.MolsToGridImage([m for m, _ in keep], molsPerRow=per_row,
-                                   subImgSize=(300, 240),
-                                   legends=[l for _, l in keep],
-                                   returnPNG=False)
-        fig_w = 3.2 * min(per_row, len(keep))
-        rows = (len(keep) + per_row - 1) // per_row
-        fig, ax = plt.subplots(figsize=(fig_w, 2.7 * rows + 0.6))
-        ax.imshow(np.asarray(img)); ax.axis("off")
-        ax.set_title(title, fontsize=11, loc="left")
-        fig.tight_layout()
-        return fig
+    parent = Chem.MolFromSmiles(input_smiles)
+    by_product = {}
+    if table is not None and len(table):
+        by_product = {r["product"]: r for r in table.to_dict("records")}
 
     figs = []
+
+    # ---- title page: the input and its own specs
+    fig = plt.figure(figsize=(11, 6.2))
+    ax = fig.add_subplot(111); ax.axis("off")
+    if parent is not None:
+        ax.imshow(np.asarray(_highlight_png(parent, [], [], (760, 380))),
+                  extent=(0, 1, 0.18, 0.92), aspect="auto")
     spec = ""
     if reference:
-        spec = "   ".join(f"{k} {v:.2f}" for k, v in reference.items()
-                          if v is not None)
-    head = panel([input_smiles],
-                 [f"INPUT  {input_smiles}" + (f"\n{spec}" if spec else "")],
-                 f"Input compound   flavor={list(flavor_condition) or 'none'}"
-                 + (f"\n{note}" if note else ""))
-    if head is not None:
-        figs.append(head)
+        spec = "     ".join(f"{k} {v:.2f}" for k, v in reference.items()
+                            if v is not None)
+    ax.set_title(f"Lead optimization: {input_smiles}\n"
+                 f"flavour = {list(flavor_condition) or 'none'}",
+                 fontsize=13, loc="left")
+    ax.text(0, 0.10, "INPUT  " + spec, fontsize=10, family="monospace")
+    if note:
+        ax.text(0, 0.03, note, fontsize=10, color="crimson", weight="bold")
+    figs.append(fig)
+
+    # ---- one section per slot
     for slot in results:
-        prods = [(s.product, s) for s in slot.suggestions if s.product]
+        prods = [s for s in slot.suggestions if s.product]
         if not prods:
             continue
-        legends = [f"#{s.rank}  {s.smiles}\nscore {s.score:+.2f}"
-                   f"{'  [novel]' if s.is_novel else ''}" for _, s in prods]
-        f = panel([p for p, _ in prods], legends,
-                  f"decomposition {slot.decomp_index}, slot {slot.slot_index}"
-                  f"   core {slot.core_smiles or '?'}"
-                  f"   replaced {slot.original_rgroup}")
-        if f is not None:
-            figs.append(f)
+        rows = (len(prods) + per_row - 1) // per_row
+        # Generous vertical room: each product carries a two-line score caption
+        # BELOW its axes, which collides with the next row's title if the grid
+        # is packed tight.
+        fig = plt.figure(figsize=(4.8 * per_row, 4.9 * rows + 3.0))
+        gs = fig.add_gridspec(rows + 1, per_row,
+                              height_ratios=[1.6] + [1] * rows,
+                              hspace=0.55, wspace=0.10)
+
+        head = fig.add_subplot(gs[0, :]); head.axis("off")
+        if parent is not None:
+            head.imshow(np.asarray(_highlight_png(
+                parent, slot.core_atoms, slot.rgroup_atoms, (900, 380))),
+                extent=(0, 1, 0, 1), aspect="auto")
+        head.set_title(
+            f"decomposition {slot.decomp_index}, slot {slot.slot_index}"
+            f"      core (blue) {slot.core_smiles or '?'}"
+            f"      replacing (orange) {slot.original_rgroup}",
+            fontsize=11, loc="left")
+
+        for k, s in enumerate(prods):
+            ax = fig.add_subplot(gs[1 + k // per_row, k % per_row])
+            ax.axis("off")
+            m = Chem.MolFromSmiles(s.product)
+            if m is not None:
+                ax.imshow(np.asarray(_highlight_png(m, [], [], (520, 380))))
+            row = by_product.get(s.product, {})
+            ax.set_title(f"#{s.rank}  {s.smiles}   score {s.score:+.2f}",
+                         fontsize=9, loc="left")
+            ax.text(0, -0.10, _score_caption(row) if row else "",
+                    transform=ax.transAxes, fontsize=8, family="monospace",
+                    va="top")
+        figs.append(fig)
+
     if not figs:
         return None
     if out_path.suffix.lower() == ".pdf":
         with PdfPages(out_path) as pdf:
             for f in figs:
-                pdf.savefig(f); plt.close(f)
+                pdf.savefig(f, bbox_inches="tight"); plt.close(f)
     else:
         for i, f in enumerate(figs):
-            p = out_path if i == 0 else out_path.with_name(
+            q = out_path if i == 0 else out_path.with_name(
                 f"{out_path.stem}_{i}{out_path.suffix}")
-            f.savefig(p, dpi=150); plt.close(f)
+            f.savefig(q, dpi=150, bbox_inches="tight"); plt.close(f)
     return out_path
 
 
@@ -362,7 +441,7 @@ def run_lead_optimization(input_compound, lead_optimizer, flavor_condition,
             note = "POCKET SUPPLIED BUT INERT -- ranking identical without it"
         gallery_path = render_gallery(results, smiles, Path(gallery),
                                       flavor_condition=labels, note=note,
-                                      reference=reference)
+                                      reference=reference, table=table)
 
     return LeadOptimizationReport(
         input_smiles=smiles, flavor_condition=labels, reference=reference,

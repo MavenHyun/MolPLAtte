@@ -66,6 +66,17 @@ DECOMP_KWARGS = dict(
 )
 
 
+def _submol_smiles(mol, atom_indices) -> str:
+    """SMILES of the sub-molecule spanned by *atom_indices*, or ""."""
+    if not atom_indices:
+        return ""
+    try:
+        return Chem.MolFragmentToSmiles(mol, atomsToUse=list(atom_indices),
+                                        canonical=True)
+    except Exception:  # noqa: BLE001
+        return ""
+
+
 def _n_aromatic(smiles: str) -> int:
     m = Chem.MolFromSmiles(smiles) if smiles else None
     return sum(1 for a in m.GetAtoms() if a.GetIsAromatic()) if m else -1
@@ -110,6 +121,11 @@ class SlotResult:
     core_smiles: str
     original_rgroup: str
     suggestions: List[Suggestion]
+    #: Parent-molecule atom indices, for highlighting. The decomposer fills in
+    #: `core_atoms` but leaves `core_smiles` empty, so both are carried here:
+    #: the indices are what a depiction needs, and the SMILES is derived.
+    core_atoms: tuple = ()
+    rgroup_atoms: tuple = ()
 
 
 class LeadOptimizer:
@@ -385,12 +401,20 @@ class LeadOptimizer:
                                 _n_aromatic(prod)
                                 >= _n_aromatic(smiles) - removed)
 
+                core_atoms = tuple(getattr(decomp, "core_atoms", ()) or ())
+                rg = decomp.rgroups[slot]
+                rgroup_atoms = tuple(getattr(rg, "rgroup_atoms", ()) or ())
                 results.append(SlotResult(
                     decomp_index=d_idx,
                     slot_index=slot,
-                    core_smiles=getattr(decomp, "core_smiles", "") or "",
+                    # The decomposer declares core_smiles but never fills it in,
+                    # so derive it from the atom indices it DOES fill in.
+                    core_smiles=(getattr(decomp, "core_smiles", "") or
+                                 _submol_smiles(mol, core_atoms)),
                     original_rgroup=self._rgroup_smiles_of(mol, decomp, slot),
                     suggestions=sugg,
+                    core_atoms=core_atoms,
+                    rgroup_atoms=rgroup_atoms,
                 ))
         return results
 
