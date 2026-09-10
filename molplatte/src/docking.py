@@ -98,8 +98,10 @@ class VinaDocker:
     """
 
     receptor_pdbqt: Path
-    center: Tuple[float, float, float]
-    box_size: Tuple[float, float, float]
+    #: The plain PDB the PDBQT was built from. PyMOL reads this, not the PDBQT.
+    receptor_pdb: Optional[Path] = None
+    center: Tuple[float, float, float] = (0.0, 0.0, 0.0)
+    box_size: Tuple[float, float, float] = (20.0, 20.0, 20.0)
     exhaustiveness: int = 8
     _vina: object = None
     _xtal: Optional[np.ndarray] = None
@@ -162,7 +164,8 @@ class VinaDocker:
         xtal = lig.getCoords()
         centre = xtal.mean(0)
         size = np.maximum(xtal.max(0) - xtal.min(0) + pad, min_box)
-        obj = cls(receptor_pdbqt=rec_qt,
+        obj = cls(receptor_pdb=rec_pdb,
+                  receptor_pdbqt=rec_qt,
                   center=tuple(map(float, centre)),
                   box_size=tuple(map(float, size)),
                   exhaustiveness=exhaustiveness)

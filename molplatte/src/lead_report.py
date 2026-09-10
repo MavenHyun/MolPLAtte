@@ -302,6 +302,49 @@ def _score_caption(row) -> str:
             f"{'   NOVEL' if row.get('is_novel') else ''}")
 
 
+#: Interpreter that can `import pymol`. PyMOL pulls Qt5/X11 and conda would put
+#: its numpy underneath a pip-installed torch, so it lives in its OWN env and is
+#: driven as a subprocess. Absent, the matplotlib renderer below is used --
+#: PyMOL is optional, not required.
+PYMOL_PYTHON = os.environ.get(
+    "MOLPLATTE_PYMOL_PYTHON",
+    str(Path.home() / "miniconda3" / "envs" / "molplatte-viz" / "bin" / "python"))
+_PYMOL_SCRIPT = Path(__file__).resolve().parent / "scripts" / "render_pose_pymol.py"
+
+
+def pymol_available() -> bool:
+    return Path(PYMOL_PYTHON).is_file() and _PYMOL_SCRIPT.is_file()
+
+
+def _pose_png_pymol(sdf_path, receptor_pdb, out_png) -> bool:
+    """Ray-trace one pose with PyMOL. False if it did not produce an image."""
+    import subprocess
+
+    try:
+        subprocess.run(
+            [PYMOL_PYTHON, str(_PYMOL_SCRIPT), str(receptor_pdb),
+             str(sdf_path), str(out_png)],
+            capture_output=True, timeout=300, check=False)
+    except Exception:  # noqa: BLE001 - fall back rather than lose the page
+        return False
+    return Path(out_png).is_file() and Path(out_png).stat().st_size > 0
+
+
+def _pose_page_from_image(png_path, size=(9.0, 6.9)):
+    """Wrap a rendered PNG in a figure so it can join the PDF pages."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    import matplotlib.image as mpimg
+
+    fig = plt.figure(figsize=size)
+    ax = fig.add_subplot(111)
+    ax.imshow(mpimg.imread(str(png_path)))
+    ax.set_axis_off()
+    fig.subplots_adjust(left=0, right=1, top=0.93, bottom=0)
+    return fig
+
+
 def _pose_png(sdf_path, receptor_atoms=None, size=(6.6, 5.0), contact=6.0):
     """3D depiction of a docked pose with its contacting pocket atoms.
 
@@ -386,7 +429,7 @@ def render_gallery(results, input_smiles: str, out_path: Path,
                    per_row: int = 3, note: str = "",
                    reference: Optional[Dict[str, Optional[float]]] = None,
                    table=None, poses: Optional[Dict[str, Path]] = None,
-                   receptor_atoms=None) -> Optional[Path]:
+                   receptor_atoms=None, receptor_pdb=None) -> Optional[Path]:
     """One section per (decomposition, slot).
 
     Each opens with the parent molecule showing which atoms are the CORE and
@@ -477,7 +520,16 @@ def render_gallery(results, input_smiles: str, out_path: Path,
             sdf = poses.get(prod)
             if not sdf or not Path(sdf).is_file() or shown >= 6:
                 continue
-            fig = _pose_png(sdf, receptor_atoms)
+            fig, how = None, ""
+            if receptor_pdb and pymol_available():
+                png = Path(sdf).with_suffix(".render.png")
+                if _pose_png_pymol(sdf, receptor_pdb, png):
+                    fig = _pose_page_from_image(png)
+                    how = ("PyMOL: pocket surface, ligand sticks, "
+                           "polar contacts dashed")
+            if fig is None:                       # PyMOL absent or failed
+                fig = _pose_png(sdf, receptor_atoms)
+                how = "pocket atoms within 6 A in blue"
             if fig is None:
                 continue
             row = {}
@@ -491,7 +543,7 @@ def render_gallery(results, input_smiles: str, out_path: Path,
                 f"docked pose   {prod}\n"
                 + (f"vina {v:+.2f} kcal/mol" if v is not None else "")
                 + (f"   ({dv:+.2f} vs input)" if dv is not None else "")
-                + "   pocket atoms within 6 A in blue",
+                + f"   {how}",
                 fontsize=9, x=0.02, ha="left")
             figs.append(fig)
             shown += 1
@@ -599,6 +651,7 @@ def run_lead_optimization(input_compound, lead_optimizer, flavor_condition,
     redock = None
     pose_files = None
     receptor_atoms = None
+    receptor_pdb = None
     if dock:
         if receptor is None:
             raise ValueError(
@@ -627,6 +680,7 @@ def run_lead_optimization(input_compound, lead_optimizer, flavor_condition,
                 pose_files = {s: poses / f"pose_{i:03d}.sdf"
                               for i, s in enumerate(targets)}
             receptor_atoms = getattr(docker, "_pocket_atoms", None)
+            receptor_pdb = getattr(docker, "receptor_pdb", None)
             reference["vina_score"] = vina_map.get(smiles)
         except DockingUnavailable as exc:
             import warnings
@@ -644,7 +698,8 @@ def run_lead_optimization(input_compound, lead_optimizer, flavor_condition,
                                       flavor_condition=labels, note=note,
                                       reference=reference, table=table,
                                       poses=pose_files,
-                                      receptor_atoms=receptor_atoms)
+                                      receptor_atoms=receptor_atoms,
+                                      receptor_pdb=receptor_pdb)
 
     return LeadOptimizationReport(
         input_smiles=smiles, flavor_condition=labels, reference=reference,
