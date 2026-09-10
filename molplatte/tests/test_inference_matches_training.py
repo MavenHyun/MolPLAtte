@@ -176,3 +176,56 @@ def test_the_three_contrastive_temperatures_are_distinct():
         f"temperatures collapsed to one value {found}; the inference-side "
         "comments about reading the wrong one should be revisited"
     )
+
+
+# --------------------------------------------------------------------------
+# Checkpoint self-description
+# --------------------------------------------------------------------------
+
+def test_infer_reads_the_sidecar_first():
+    import json
+    import tempfile
+
+    from checkpoint_spec import infer_model_kwargs, write_sidecar
+
+    with tempfile.TemporaryDirectory() as d:
+        ckpt = Path(d) / "m.pt"
+        ckpt.write_bytes(b"")                       # never read when a sidecar exists
+        write_sidecar(ckpt, {"condvec_dim": 1304, "pocket_input_dim": 1280})
+        got = infer_model_kwargs({}, ckpt)
+        assert got == {"condvec_dim": 1304, "pocket_input_dim": 1280}
+
+
+def test_infer_detects_an_assembly_head_from_shapes():
+    """The exact defect that broke the notebook: kwargs omitted assembly_head."""
+    import torch
+
+    from checkpoint_spec import infer_model_kwargs
+
+    sd = {
+        "nnet.graph_projector.projection.0.weight": torch.zeros(300, 300),
+        # 300 hidden + 24 flavour + 32 reduced pocket = 356
+        "nnet.query_projector.projection.0.weight": torch.zeros(300, 356),
+        "nnet.assembly_head.fuse.0.weight": torch.zeros(4, 4),
+        "nnet.pocket_conditioning.basis": torch.zeros(32, 1280),
+    }
+    kw = infer_model_kwargs(sd)
+    assert kw["assembly_head"] == "AssemblyHead"
+    assert kw["pocket_input_dim"] == 1280 and kw["pocket_dim"] == 32
+    # condvec_dim is what the CORPUS stores: flavour + RAW pocket, not reduced
+    assert kw["condvec_dim"] == 24 + 1280
+
+
+def test_infer_refuses_to_guess_an_ambiguous_checkpoint():
+    """A widened-but-untrained pocket path cannot be told from a wide flavour
+    half by shape alone. Guessing loads a model that runs and is wrong."""
+    import torch
+
+    from checkpoint_spec import infer_model_kwargs
+
+    sd = {
+        "nnet.graph_projector.projection.0.weight": torch.zeros(300, 300),
+        "nnet.query_projector.projection.0.weight": torch.zeros(300, 356),
+    }
+    with pytest.raises(ValueError, match="ambiguous"):
+        infer_model_kwargs(sd)

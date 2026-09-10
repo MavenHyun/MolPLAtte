@@ -5,6 +5,8 @@ import logging
 from typing import Optional
 
 import torch
+
+from checkpoint_spec import write_sidecar
 import pytorch_lightning as pl
 
 
@@ -69,5 +71,25 @@ class SaveBestModelCheckpoint(pl.Callback):
         target = pl_module.model.model if hasattr(pl_module.model, "model") else pl_module.model
         os.makedirs(os.path.dirname(self.save_path), exist_ok=True)
         torch.save(target.state_dict(), self.save_path)
+        # A sidecar recording how to rebuild this. These are plain state_dicts
+        # with no config in them, so without it every consumer has to restate
+        # the architecture by hand -- and a wrong restatement loads a model that
+        # runs and is wrong. See checkpoint_spec.
+        try:
+            cfg = getattr(target, "config", None)
+            if cfg is not None:
+                kw = {"condvec_dim": int(getattr(cfg, "condvec_dim", 0)),
+                      "pocket_input_dim": int(getattr(cfg, "pocket_input_dim", 0)),
+                      "pocket_dim": int(getattr(cfg, "pocket_dim", 0))}
+                head = getattr(cfg, "assembly_head", None)
+                if head:
+                    kw["assembly_head"] = head
+                basis = getattr(cfg, "pocket_basis_path", None)
+                write_sidecar(self.save_path, kw,
+                              monitor=self.monitor, value=current,
+                              pocket_basis_path=basis)
+        except Exception as exc:  # noqa: BLE001 - never lose a checkpoint over metadata
+            logging.getLogger(__name__).warning(
+                "could not write checkpoint sidecar: %s", exc)
         logging.getLogger(__name__).info(
             f"Saved best model ({self.monitor}={current:.4f}) → {self.save_path}")

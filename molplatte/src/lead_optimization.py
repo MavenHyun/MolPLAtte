@@ -52,6 +52,7 @@ from molplatte_prep.mol_features import pyg_to_mol  # noqa: E402
 from molplatte_prep.molpla_instance import build_instance  # noqa: E402
 from data_modules.rgroup_vocab import RGroupLibraryVocab  # noqa: E402
 from retrieval_scoring import logq_corrected, rgroup_temperature  # noqa: E402
+from checkpoint_spec import infer_model_kwargs  # noqa: E402
 
 #: Must match the corpus. A different decomposition yields different WL hashes,
 #: so retrieval targets stop matching the library and Hit@K drops quietly
@@ -143,14 +144,32 @@ class LeadOptimizer:
              **model_kwargs) -> "LeadOptimizer":
         """Load a checkpoint and its library.
 
-        ``model_kwargs`` must reproduce the architecture the checkpoint was
-        trained with -- above all ``condvec_dim`` and ``pocket_input_dim``. The
-        query projector's input width is a function of both, so a mismatch is a
-        shape error at load rather than a silently wrong model.
+        ``model_kwargs`` is OPTIONAL. Omitted, the architecture is recovered
+        from the checkpoint's sidecar ``<name>.json`` or, failing that, from its
+        tensor shapes -- see ``checkpoint_spec``. Anything passed explicitly
+        overrides what was inferred, which is the escape hatch for a checkpoint
+        that predates sidecars and is ambiguous by shape.
+
+        Restating the architecture by hand was the default until 2026-09-09 and
+        it was a footgun: the notebook declared ``condvec_dim=24,
+        pocket_input_dim=0`` against a 356-wide checkpoint carrying an assembly
+        head, and nothing caught it until the notebook was first executed.
         """
         state = torch.load(checkpoint, map_location="cpu", weights_only=False)
         state = state.get("state_dict", state) if isinstance(state, dict) else state
-        model = MolPLAtte(**model_kwargs)
+
+        inferred = infer_model_kwargs(state, checkpoint)
+        if model_kwargs:
+            clashes = {k: (inferred[k], v) for k, v in model_kwargs.items()
+                       if k in inferred and inferred[k] != v}
+            if clashes:
+                logger.warning(
+                    "[LeadOptimizer] overriding inferred architecture: %s",
+                    ", ".join(f"{k} {a!r}->{b!r}" for k, (a, b) in clashes.items()))
+        resolved = {**inferred, **model_kwargs}
+        logger.info("[LeadOptimizer] architecture: %s%s", resolved,
+                    "" if model_kwargs else "  (inferred)")
+        model = MolPLAtte(**resolved)
         missing, unexpected = model.load_state_dict(state, strict=False)
         if unexpected:
             raise ValueError(f"checkpoint has {len(unexpected)} unexpected tensors, "
