@@ -22,3 +22,5 @@ molplatte_preprocess/wandb/
 .ipynb_checkpoints/
 .DS_Store
 .pytest_cache/
+molplatte/notebooks/docked_poses/
+molplatte/notebooks/*.pdf

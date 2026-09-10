@@ -140,6 +140,13 @@ class LeadOptimizationReport:
     results: list = field(default_factory=list)
     pocket_used: bool = False
     pocket_changed_ranking: Optional[bool] = None
+    #: RMSD of the redocked crystal ligand against its own pose. Under ~2 A
+    #: means the docking setup reproduces known truth; None means no docking.
+    redock_rmsd: Optional[float] = None
+    docked_receptor: Optional[str] = None
+    #: Directory of top docked poses as SDF, one per compound. A score without
+    #: its pose cannot be inspected.
+    pose_dir: Optional[str] = None
 
     def reference_row(self):
         """The input compound as a one-row DataFrame, for display beside the
@@ -157,7 +164,8 @@ class LeadOptimizationReport:
         return (f"<LeadOptimizationReport {self.input_smiles!r} "
                 f"flavor={self.flavor_condition} "
                 f"{n} compound{'s' if n != 1 else ''}"
-                f"{', pocket INERT' if self.pocket_changed_ranking is False else ''}>")
+                f"{', pocket INERT' if self.pocket_changed_ranking is False else ''}"
+                f"{f', redock {self.redock_rmsd:.2f}A' if self.redock_rmsd is not None else ''}>")
 
 
 #: Properties carried for both the input and every product, so the table can
@@ -166,7 +174,8 @@ SPEC_KEYS = ("MW", "logP", "QED", "SAScore", "NPScore")
 
 
 def build_tables(results, input_smiles: str,
-                 reference: Optional[Dict[str, Optional[float]]] = None):
+                 reference: Optional[Dict[str, Optional[float]]] = None,
+                 vina: Optional[Dict[str, Optional[float]]] = None):
     """Deduplicated product table plus the assembly failures.
 
     ``reference`` is the INPUT compound's specs. When given, each product also
@@ -200,6 +209,13 @@ def build_tables(results, input_smiles: str,
                     aromaticity_kept=s.aromaticity_kept,
                     is_input=(s.product == input_smiles),
                     **molecule_scores(s.product))
+                if vina is not None:
+                    keep["vina_score"] = vina.get(s.product)
+                    ref_v = (reference or {}).get("vina_score")
+                    if keep["vina_score"] is not None and ref_v is not None:
+                        keep["dvina"] = float(keep["vina_score"]) - float(ref_v)
+                    else:
+                        keep["dvina"] = None
                 if reference:
                     for k in SPEC_KEYS:
                         a, b = keep.get(k), reference.get(k)
@@ -217,6 +233,8 @@ def build_tables(results, input_smiles: str,
         r["found_in_slots"] = ",".join(slots)
     cols = ["product", "rgroup", "retrieval_score", "MW", "logP", "QED",
             "SAScore", "NPScore"]
+    if vina is not None:
+        cols += ["vina_score", "dvina"]
     if reference:
         cols += [f"d{k}" for k in SPEC_KEYS]
     cols += ["is_novel", "corpus_count", "aromaticity_kept", "is_input",
@@ -394,7 +412,14 @@ def run_lead_optimization(input_compound, lead_optimizer, flavor_condition,
                           top_k: int = 10, *, pocket_condition=None,
                           gallery: Optional[str | Path] = None,
                           max_decompositions: int = 4,
-                          verify_pocket: bool = True) -> LeadOptimizationReport:
+                          verify_pocket: bool = True,
+                          receptor: Optional[str | Path] = None,
+                          dock: bool = False,
+                          exhaustiveness: int = 8,
+                          ligand_resname: Optional[str] = None,
+                          ligand_resname_smiles: Optional[str] = None,
+                          pose_dir: Optional[str | Path] = None
+                          ) -> LeadOptimizationReport:
     """Retrieve, assemble, score, visualise.
 
     ``pocket_condition`` is a 1280-d ESM-2 pocket embedding, e.g. from
@@ -425,15 +450,77 @@ def run_lead_optimization(input_compound, lead_optimizer, flavor_condition,
         changed = _ranking_of(control) != _ranking_of(results)
         if not changed:
             import warnings
+
+            # Two very different reasons the ranking did not move, and saying
+            # the wrong one is worse than saying nothing: a zero adapter CANNOT
+            # do anything, while a trained adapter that changes nothing is the
+            # measured weakness of pocket conditioning on this input.
+            # nn.ModuleDict is not attribute-accessible by key -- getattr
+            # returns None and the message silently reports "untrained".
+            nnet = getattr(lead_optimizer.model, "nnet", None)
+            pc = (nnet["pocket_conditioning"]
+                  if nnet is not None and "pocket_conditioning" in nnet else None)
+            # Check the OUTPUT layer, not any parameter. Both reductions
+            # zero-init only their last layer -- the free reduction's hidden
+            # Linear(1280,128) is randomly initialised, so "any parameter is
+            # non-zero" reports an untrained path as trained.
+            proj = getattr(pc, "project", None) if pc is not None else None
+            out_w = None
+            if proj is not None:
+                for mod in reversed(list(proj)):
+                    if hasattr(mod, "weight"):
+                        out_w = mod.weight
+                        break
+            trained = out_w is not None and float(out_w.detach().abs().sum()) > 0
+            why = ("the pocket path IS trained, so this is the measured weakness "
+                   "of pocket conditioning on this input rather than a dead "
+                   "path -- see docs/step3_pocket_capacity_2026-09-09.md"
+                   if trained else
+                   "this checkpoint's pocket reduction is UNTRAINED (zero-init), "
+                   "so the pocket contributes exactly zero")
             warnings.warn(
-                "POCKET HAD NO EFFECT: the ranking is identical with and "
-                "without it. This checkpoint's pocket reduction is untrained "
-                "(zero-init), so the pocket contributes exactly zero. Treat "
-                "this result as flavour-conditioned only.",
+                f"POCKET HAD NO EFFECT: the ranking is identical with and "
+                f"without it. Here {why}. Treat this result as "
+                f"flavour-conditioned only.",
                 RuntimeWarning, stacklevel=2)
 
     reference = molecule_scores(smiles)
-    table, failures = build_tables(results, smiles, reference)
+
+    # --- AutoDock Vina against the receptor that supplied the pocket
+    vina_map = None
+    redock = None
+    if dock:
+        if receptor is None:
+            raise ValueError(
+                "dock=True needs `receptor`: the structure to dock into. Use "
+                "the SAME structure the pocket embedding came from, or the "
+                "score is measuring a different site than the model was "
+                "conditioned on."
+            )
+        from docking import DockingUnavailable, VinaDocker
+
+        try:
+            docker = VinaDocker.from_structure(
+                receptor, ligand_resname=ligand_resname,
+                exhaustiveness=exhaustiveness)
+            # Validate the setup BEFORE trusting any number out of it. A wrong
+            # protonation or a mis-centred box returns plausible energies.
+            # The control redocks the CRYSTAL ligand, not the input compound --
+            # only the crystal ligand has a known pose to compare against.
+            redock = docker.redock_control(ligand_resname_smiles or smiles)
+            products = [s.product for sl in results for s in sl.suggestions
+                        if s.product]
+            poses = Path(pose_dir) if pose_dir else None
+            vina_map = docker.dock_many(sorted(set(products + [smiles])),
+                                        pose_dir=poses)
+            reference["vina_score"] = vina_map.get(smiles)
+        except DockingUnavailable as exc:
+            import warnings
+
+            warnings.warn(f"docking skipped: {exc}", RuntimeWarning, stacklevel=2)
+            vina_map = None
+
+    table, failures = build_tables(results, smiles, reference, vina_map)
     gallery_path = None
     if gallery:
         note = ""
@@ -449,4 +536,7 @@ def run_lead_optimization(input_compound, lead_optimizer, flavor_condition,
         compounds=[p for p in table["product"].tolist()] if len(table) else [],
         gallery=gallery_path, results=results,
         pocket_used=pocket_condition is not None,
-        pocket_changed_ranking=changed)
+        pocket_changed_ranking=changed,
+        redock_rmsd=redock,
+        docked_receptor=str(receptor) if (dock and vina_map is not None) else None,
+        pose_dir=str(pose_dir) if (pose_dir and vina_map is not None) else None)
