@@ -266,3 +266,43 @@ def test_retro_missing_molecule_does_not_break_the_row():
     table, _ = build_tables(results, "PARENT", None, None, {})
     assert len(table) == 1
     assert table.iloc[0]["retro_solved"] is None
+
+
+def test_score_splits_into_model_and_prior():
+    """score = model + prior, exactly. The decomposition is what distinguishes
+    'the network prefers this' from 'this fragment is just common'."""
+    from lead_report import build_tables
+
+    results = [FakeSlot(0, 0, "core", "CO",
+                        [FakeSuggestion(1, 41.59, "*OCC", hash="h1",
+                                        corpus_count=5896, product="CCO")])]
+    table, _ = build_tables(results, "PARENT", None, None, None,
+                            {"h1": -5.635566}, 1.0)
+    row = table.iloc[0]
+    assert row["prior_term"] == pytest.approx(-5.635566)
+    assert row["model_term"] == pytest.approx(41.59 + 5.635566)
+    assert row["model_term"] + row["prior_term"] == pytest.approx(41.59)
+    # rarity is log10(1/p) in the same units the ranking uses
+    assert row["rgroup_idf"] == pytest.approx(5.635566 / 2.302585, abs=1e-4)
+
+
+def test_count_bands_span_the_skew():
+    """Median count is 1 and max is 172,150, so a percentile is degenerate."""
+    from lead_report import _count_band
+
+    assert _count_band(1) == "singleton"
+    assert _count_band(5) == "rare"
+    assert _count_band(50) == "uncommon"
+    assert _count_band(500) == "frequent"
+    assert _count_band(5000) == "common"
+    assert _count_band(172150) == "ubiquitous"
+
+
+def test_split_columns_absent_without_a_prior():
+    from lead_report import build_tables
+
+    results = [FakeSlot(0, 0, "core", "CO",
+                        [FakeSuggestion(1, 1.0, "*O", product="CCO")])]
+    table, _ = build_tables(results, "PARENT")
+    for c in ("model_term", "prior_term", "rgroup_idf"):
+        assert c not in table.columns

@@ -177,10 +177,29 @@ class LeadOptimizationReport:
 SPEC_KEYS = ("MW", "logP", "QED", "SAScore", "NPScore")
 
 
+#: Count bands. The library is brutally skewed -- median count 1, max 172,150,
+#: five orders of magnitude -- so a percentile is degenerate (half the rows tie
+#: at 1) and a raw count is unreadable. A log band is what survives that.
+def _count_band(n: int) -> str:
+    if n >= 10000:
+        return "ubiquitous"
+    if n >= 1000:
+        return "common"
+    if n >= 100:
+        return "frequent"
+    if n >= 10:
+        return "uncommon"
+    if n >= 2:
+        return "rare"
+    return "singleton"
+
+
 def build_tables(results, input_smiles: str,
                  reference: Optional[Dict[str, Optional[float]]] = None,
                  vina: Optional[Dict[str, Optional[float]]] = None,
-                 retro: Optional[Dict[str, dict]] = None):
+                 retro: Optional[Dict[str, dict]] = None,
+                 log_prior: Optional[Dict[str, float]] = None,
+                 popularity_coef: float = 1.0):
     """Deduplicated product table plus the assembly failures.
 
     ``reference`` is the INPUT compound's specs. When given, each product also
@@ -217,9 +236,21 @@ def build_tables(results, input_smiles: str,
                     slot=slot.slot_index, core=slot.core_smiles,
                     replaced=slot.original_rgroup,
                     corpus_count=s.corpus_count, is_novel=bool(s.is_novel),
+                    rgroup_band=_count_band(int(s.corpus_count or 0)),
                     aromaticity_kept=s.aromaticity_kept,
                     is_input=(s.product == input_smiles),
                     **molecule_scores(s.product))
+                # WHY did this rank here -- the model, or the fact that the
+                # fragment is common? The score IS sim/tau + coef*log p(k), so
+                # the two are separable, and separating them answers a question
+                # the binary `is_novel` flag could not.
+                if log_prior is not None:
+                    lp = log_prior.get(s.hash)
+                    if lp is not None:
+                        keep["prior_term"] = popularity_coef * lp
+                        keep["model_term"] = float(s.score) - popularity_coef * lp
+                        # Rarity, in the same units the ranking uses: log10(1/p).
+                        keep["rgroup_idf"] = -lp / 2.302585092994046
                 if retro is not None:
                     r_ = retro.get(s.product) or {}
                     keep["retro_solved"] = r_.get("solved")
@@ -264,8 +295,10 @@ def build_tables(results, input_smiles: str,
                        key=lambda t: [int(i) for i in t.split(",")])
         r["replaced_atoms"] = " | ".join(sites)
         r["n_sites"] = len(sites)
-    cols = ["product", "rgroup", "retrieval_score", "MW", "logP", "QED",
-            "SAScore", "NPScore"]
+    cols = ["product", "rgroup", "retrieval_score"]
+    if log_prior is not None:
+        cols += ["model_term", "prior_term", "rgroup_idf"]
+    cols += ["MW", "logP", "QED", "SAScore", "NPScore"]
     if vina is not None:
         cols += ["vina_score", "dvina"]
     if retro is not None:
@@ -273,9 +306,9 @@ def build_tables(results, input_smiles: str,
                  "retro_n_materials", "retro_materials", "retro_score"]
     if reference:
         cols += [f"d{k}" for k in SPEC_KEYS]
-    cols += ["is_novel", "corpus_count", "aromaticity_kept", "is_input",
-             "n_slots", "n_sites", "found_in_slots", "core", "replaced",
-             "replaced_atoms",
+    cols += ["rgroup_band", "corpus_count", "is_novel", "aromaticity_kept",
+             "is_input", "n_slots", "n_sites", "found_in_slots",
+             "core", "replaced", "replaced_atoms",
              "decomposition", "slot", "rank"]
     table = pd.DataFrame(rows, columns=cols) if rows else pd.DataFrame(columns=cols)
     failures = pd.DataFrame(fails) if fails else pd.DataFrame(
@@ -779,8 +812,21 @@ def run_lead_optimization(input_compound, lead_optimizer, flavor_condition,
             reference["retro_solved"] = r_in.get("solved")
             reference["retro_steps"] = r_in.get("n_steps")
 
+    # Per-hash log p(k), so the table can split the score into what the model
+    # contributed and what popularity did.
+    log_prior = None
+    try:
+        import numpy as _np
+
+        pri = _np.asarray(lead_optimizer.vocab.frequency_prior, dtype=_np.float64)
+        log_prior = {h: float(_np.log(max(pri[i], 1e-12)))
+                     for i, h in enumerate(lead_optimizer.vocab.hashes)}
+    except Exception as exc:  # noqa: BLE001 - the table is fine without it
+        logger.debug("no frequency prior available: %s", exc)
+
     table, failures = build_tables(results, smiles, reference, vina_map,
-                                   retro_map)
+                                   retro_map, log_prior,
+                                   getattr(lead_optimizer, "popularity_coef", 1.0))
     gallery_path = None
     if gallery:
         note = ""

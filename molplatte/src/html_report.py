@@ -199,14 +199,25 @@ def render_html(report, out_path: str | Path, *, title: Optional[str] = None,
     has_vina = any(r.get("vina_score") is not None for r in rows)
     has_retro = any(r.get("retro_solved") is not None for r in rows)
 
-    cols = [("#", "rank"), ("R-group", "rgroup"), ("score", "retrieval_score"),
-            ("MW", "MW"), ("logP", "logP"), ("QED", "QED"), ("SA", "SAScore"),
-            ("NP", "NPScore")]
+    has_split = any(r.get("model_term") is not None for r in rows)
+    cols = [("#", "rank"), ("R-group", "rgroup"), ("score", "retrieval_score")]
+    if has_split:
+        # What the MODEL contributed vs what popularity did. The score is
+        # sim/tau + coef*log p(k), so the two separate cleanly -- and a rare
+        # fragment the model genuinely prefers looks nothing like a common one
+        # it is indifferent to, which a single number hides.
+        cols += [("model", "model_term"), ("prior", "prior_term"),
+                 ("rarity", "rgroup_idf"), ("freq", "rgroup_band")]
+    cols += [("MW", "MW"), ("logP", "logP"), ("QED", "QED"), ("SA", "SAScore"),
+             ("NP", "NPScore")]
     if has_vina:
         cols.append(("vina", "vina_score"))
     if has_retro:
         cols += [("route", "retro_solved"), ("steps", "retro_steps")]
-    cols += [("site", "replaced_atoms"), ("novel", "is_novel")]
+    # NOT "novel": the flag means the R-group is absent from the TRAINING
+    # vocabulary, which says nothing about whether the product is a new
+    # molecule. Every product with a substituted R-group is new.
+    cols += [("site", "replaced_atoms"), ("off-vocab", "is_novel")]
 
     head = "".join(f'<th onclick="sortTable(this)">{html.escape(lbl)} '
                    f'<span class="ar"></span></th>' for lbl, _ in cols)
@@ -228,6 +239,10 @@ def render_html(report, out_path: str | Path, *, title: Optional[str] = None,
                 cell = _fmt(v, 2 if key != "MW" else 1) + _delta(
                     r.get("d" + key), 2 if key != "MW" else 1,
                     lower_is_better=(key == "SAScore"))
+            elif key in ("model_term", "prior_term"):
+                cell = f"{v:+.2f}" if v is not None else "&ndash;"
+            elif key == "rgroup_idf":
+                cell = f"{v:.2f}" if v is not None else "&ndash;"
             elif key == "retro_solved":
                 cell = _fmt(bool(v)) if v is not None else "&ndash;"
             else:
@@ -302,6 +317,14 @@ model's logQ-corrected retrieval value; <code>vina</code> is docking, which
 knows nothing about the model; <code>route</code> is an AIZynthFinder search,
 which knows nothing about either. A compound can dock better and have no route.
 Deltas in parentheses are against the input compound.
+<code>score = model + prior</code>: <code>model</code> is the network&rsquo;s
+similarity term, <code>prior</code> is <code>log p(R-group)</code> added back
+because InfoNCE optimises PMI rather than the posterior. A high score with a
+near-zero <code>model</code> means the fragment ranked on popularity alone.
+<code>rarity</code> is <code>log10(1/p)</code>; <code>freq</code> bands it,
+because the library spans five orders of magnitude with a median count of 1.
+<code>off-vocab</code> means the R-group is absent from the TRAINING
+vocabulary &mdash; not that the product is a new molecule.
 <code>route = NO</code> means none was found within the search budget, not that
 none exists.
 </div>
