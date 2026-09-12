@@ -30,3 +30,4 @@ molplatte/notebooks/*.pdf
 # mistake from the first commit and is untracked as of 2026-09-10. The pattern
 # covers claude_03.md and onwards without needing another edit.
 claude_*.md
+molplatte/notebooks/viewer_*.html

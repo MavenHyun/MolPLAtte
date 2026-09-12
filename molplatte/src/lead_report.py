@@ -147,6 +147,10 @@ class LeadOptimizationReport:
     #: Directory of top docked poses as SDF, one per compound. A score without
     #: its pose cannot be inspected.
     pose_dir: Optional[str] = None
+    #: {smiles: full AIZynthFinder result}, including the best route TREE. Kept
+    #: off the DataFrame because a route is nested, and a table cell that holds
+    #: a tree is a table cell nobody reads.
+    routes: Dict[str, dict] = field(default_factory=dict)
 
     def reference_row(self):
         """The input compound as a one-row DataFrame, for display beside the
@@ -222,6 +226,9 @@ def build_tables(results, input_smiles: str,
                     keep["retro_steps"] = r_.get("n_steps")
                     keep["retro_score"] = r_.get("score")
                     keep["retro_routes"] = r_.get("n_solved_routes")
+                    mats = r_.get("starting_materials") or []
+                    keep["retro_materials"] = " . ".join(mats)
+                    keep["retro_n_materials"] = len(mats)
                 if vina is not None:
                     keep["vina_score"] = vina.get(s.product)
                     ref_v = (reference or {}).get("vina_score")
@@ -262,7 +269,8 @@ def build_tables(results, input_smiles: str,
     if vina is not None:
         cols += ["vina_score", "dvina"]
     if retro is not None:
-        cols += ["retro_solved", "retro_steps", "retro_routes", "retro_score"]
+        cols += ["retro_solved", "retro_steps", "retro_routes",
+                 "retro_n_materials", "retro_materials", "retro_score"]
     if reference:
         cols += [f"d{k}" for k in SPEC_KEYS]
     cols += ["is_novel", "corpus_count", "aromaticity_kept", "is_input",
@@ -792,6 +800,7 @@ def run_lead_optimization(input_compound, lead_optimizer, flavor_condition,
         gallery=gallery_path, results=results,
         pocket_used=pocket_condition is not None,
         pocket_changed_ranking=changed,
+        routes=retro_map or {},
         redock_rmsd=redock,
         docked_receptor=str(receptor) if (dock and vina_map is not None) else None,
         pose_dir=str(pose_dir) if (pose_dir and vina_map is not None) else None)

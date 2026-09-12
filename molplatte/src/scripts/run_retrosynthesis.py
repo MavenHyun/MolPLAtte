@@ -74,6 +74,30 @@ def main() -> int:
                 elif isinstance(entry, (int, float)):
                     vals.append(float(entry))
             rec["score"] = max(vals) if vals else None
+
+            # The ROUTE itself, not just its summary. A tree of mol -> reaction
+            # -> mol dicts; leaves carry in_stock. Only the best route is kept:
+            # a solved target can have hundreds and they do not fit in a report.
+            dicts = list(finder.routes.dicts) if finder.routes else []
+            if dicts:
+                route = dicts[0]
+                rec["route"] = route
+                mats, rxns = [], []
+
+                def _walk(node):
+                    if node.get("type") == "mol":
+                        if node.get("in_stock") and not node.get("children"):
+                            mats.append(node.get("smiles"))
+                    elif node.get("type") == "reaction":
+                        rxns.append(node.get("smiles"))
+                    for ch in node.get("children") or []:
+                        _walk(ch)
+
+                _walk(route)
+                # Deduplicated but order-preserving: a starting material used
+                # twice is one purchase, and the order is the route's own.
+                rec["starting_materials"] = list(dict.fromkeys(m for m in mats if m))
+                rec["reactions"] = rxns
         except Exception as exc:  # noqa: BLE001 - one bad molecule must not
             rec["error"] = f"{type(exc).__name__}: {exc}"[:200]
         rec["seconds"] = round(time.time() - t0, 1)
