@@ -22,12 +22,18 @@ molplatte_preprocess/wandb/
 .ipynb_checkpoints/
 .DS_Store
 .pytest_cache/
-molplatte/notebooks/docked_poses/
+# Notebook OUTPUTS, not source. The filenames come from a user-set TAG, so
+# these are patterned on extension and suffix rather than on any fixed name --
+# an earlier `viewer_*.html` pattern silently stopped matching the moment the
+# naming scheme changed, and the 5 MB viewers were a `git add` away from the
+# repo.
 molplatte/notebooks/*.pdf
+molplatte/notebooks/*.html
+molplatte/notebooks/*_poses/
+molplatte/notebooks/docked_poses/
 
 # Local working-instruction files: notes to the assistant, not project source.
 # None of them belong in the repo, claude_00.md included -- it was tracked by
 # mistake from the first commit and is untracked as of 2026-09-10. The pattern
 # covers claude_03.md and onwards without needing another edit.
 claude_*.md
-molplatte/notebooks/viewer_*.html
