@@ -314,10 +314,29 @@ S2_SEEDS = [
     for fr, lr in S2_SEED_CONFIGS for sd in SEEDS_EXTRA
 ]
 
+# --------------------------------------------------------------- stage SHIP
+# The deliverable. The width scan inherited assembly.enabled=false from the
+# Stage A baseline, so the ENTIRE tuned branch has no assembly head -- it
+# cannot build molecules, which is what the notebook exists to do. Retrained
+# here at the tuned settings with the head on. Retrieval should land at the
+# swept 0.3701; assembly is the part that was missing.
+SHIP_SHAPE = BASE_MODEL + ["nnet_module_kwargs.hidden_dim=512",
+                           "assembly.enabled=true",
+                           "loss_module_kwargs.loss_rgroup_kwargs.temperature=0.01"]
+SHIP_ARMS = [
+    Arm("ship-s1-w512-asm", "s1", "coconut-flavordb-full", 30,
+        model=SHIP_SHAPE,
+        overrides=["lightning_module_kwargs.learning_rate=1.0e-3"]),
+    Arm("ship-s2-final", "s2", "coconut-flavordb-full", 20,
+        model=SHIP_SHAPE,
+        overrides=["lightning_module_kwargs.learning_rate=1.0e-4"],
+        init_from="ship-s1-w512-asm_best.pt"),
+]
+
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--stage", choices=["A", "W", "B1", "B2", "BLR", "C", "D", "all"],
+    ap.add_argument("--stage", choices=["A", "W", "B1", "B2", "BLR", "C", "D", "SHIP", "all"],
                     default="A")
     ap.add_argument("--gpu", default="1")
     ap.add_argument("--dry-run", action="store_true")
@@ -339,6 +358,19 @@ def main() -> int:
                 print(f"  {arm.name:<38} CONFIG MISMATCH: {bad}")
                 record(arm, {}, f"CONFIG MISMATCH: {bad}", args.dry_run)
                 continue
+            res = score(arm, args.gpu, args.dry_run)
+            record(arm, res, "", args.dry_run)
+            print(f"  {arm.name:<38} H@1={res.get('H@1')}")
+
+    if args.stage in ("SHIP", "all"):
+        for arm in SHIP_ARMS:
+            ok = train(arm, args.gpu, args.dry_run)
+            if not ok and not args.dry_run:
+                record(arm, {}, "TRAIN FAILED", args.dry_run); break
+            bad = None if args.dry_run else assert_trained_as_scored(arm)
+            if bad:
+                print(f"  {arm.name:<38} CONFIG MISMATCH: {bad}")
+                record(arm, {}, f"CONFIG MISMATCH: {bad}", args.dry_run); break
             res = score(arm, args.gpu, args.dry_run)
             record(arm, res, "", args.dry_run)
             print(f"  {arm.name:<38} H@1={res.get('H@1')}")
