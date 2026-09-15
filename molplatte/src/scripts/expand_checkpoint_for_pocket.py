@@ -74,12 +74,28 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("checkpoint", type=Path)
     ap.add_argument("--out", type=Path, required=True)
-    ap.add_argument("--hidden-dim", type=int, default=300)
+    # Default None, not 300. Hardcoding MolPLA's released width made this
+    # script refuse every wider checkpoint with a misleading "narrowing" error:
+    # a hidden_dim=512 model takes 536 inputs, which is wider than the 356 the
+    # default implies, so the widen-only guard fired on a checkpoint that
+    # genuinely needed widening. Derived from the checkpoint when not given.
+    ap.add_argument("--hidden-dim", type=int, default=None)
     ap.add_argument("--flavor-dim", type=int, default=24)
     ap.add_argument("--pocket-dim", type=int, default=32)
     ap.add_argument("--check", action="store_true", default=True)
     args = ap.parse_args()
 
+    if args.hidden_dim is None:
+        # The projector's OUTPUT width is the node-embedding width.
+        import torch as _t
+
+        _sd = _t.load(args.checkpoint, map_location="cpu", weights_only=False)
+        _sd = _sd.get("state_dict", _sd)
+        _k = [k for k in _sd if k.endswith("query_projector.projection.0.weight")]
+        if not _k:
+            raise SystemExit("cannot find the query projector; pass --hidden-dim")
+        args.hidden_dim = int(_sd[_k[0]].shape[0])
+        print(f"  hidden_dim {args.hidden_dim} (derived from the checkpoint)")
     target = args.hidden_dim + args.flavor_dim + args.pocket_dim
     ck = torch.load(args.checkpoint, map_location="cpu", weights_only=False)
     state = ck.get("state_dict", ck) if isinstance(ck, dict) else ck

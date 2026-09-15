@@ -215,6 +215,13 @@ gradient. It is a representation ceiling.
 
 ## 4. What ZINC actually bought: the assembly head
 
+> **And it is no longer the only source of one, 2026-09-15.** Flavour-only
+> training with `assembly.enabled=true` gives an assembly head at 0.969 exact /
+> 0.024 head gap -- matching the ZINC-derived 0.966 -- alongside identical
+> retrieval, in 73 min against 158. With this, ZINC's last justification is
+> gone and the stage can be retired. See
+> [hyperparameter_sweep_2026-09-15.md](hyperparameter_sweep_2026-09-15.md).
+
 | | exact | control | head gap | aromaticity | atomic_num | total_num_hs |
 |---|---:|---:|---:|---:|---:|---:|
 | ZINC only (STEP 1) | 0.906 | 0.993 | 0.087 | 0.979 | 0.934 | 0.927 |

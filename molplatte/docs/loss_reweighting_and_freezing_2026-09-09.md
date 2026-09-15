@@ -1,5 +1,27 @@
 # Loss reweighting, and when freezing helps
 
+> **SUPERSEDED IN PART, 2026-09-15.** The freezing conclusion below is wrong,
+> and the reason is instructive: it was a LEARNING-RATE artifact.
+>
+> A hyperparameter sweep swept `lr` for the first time (it had been fixed at
+> MolPLA's released 1.0e-3 and never examined). At the tuned 1.0e-4, freezing
+> the encoder COSTS 0.0103 H@1 -- 17.8 sigma over three seeds, sd 0.0005 on
+> both arms. The freeze effect reverses with lr:
+>
+> | lr | freeze=none | freeze=encoder | freezing |
+> |---|---:|---:|---|
+> | 1.0e-3 | 0.3411 | 0.3532 | **helps** +0.0121 |
+> | 1.0e-4 | **0.3701** | 0.3598 | **hurts** -0.0103 |
+>
+> So freezing was compensating for a learning rate that was too high. The
+> +0.0098 measured below is real as a measurement and wrong as a conclusion:
+> it is what freezing buys you at lr 1.0e-3, not evidence that a frozen
+> encoder is better. Fix the lr and the sign flips.
+>
+> What survives unchanged: the loss-reweighting null (§1), the test/val split
+> correction (§0), and the finding that the ZINC encoder is a poor flavour
+> encoder. See [hyperparameter_sweep_2026-09-15.md](hyperparameter_sweep_2026-09-15.md).
+
 Runs of 2026-09-09, seed 911012, corpus `coconut-flavordb-full`, all scored
 against the 668,913-row union library (effective vocabulary 6,916).
 
@@ -9,10 +31,11 @@ against the 668,913-row union library (effective vocabulary 6,916).
    nothing else. The "linker/rgroup trade-off" reported in
    [step1_zinc_transfer_2026-09-09.md](step1_zinc_transfer_2026-09-09.md) does
    not exist; the objectives are decoupled.
-2. **Freezing helps — if the encoder is right.** Freezing a *flavour*-trained
-   encoder gains +0.0098 H@1 over the identical unfrozen run. The earlier
-   conclusion that freezing is harmful was measuring a bad ZINC encoder, not
-   freezing.
+2. ~~**Freezing helps — if the encoder is right.**~~ **WRONG, see the banner.**
+   The +0.0098 is what freezing buys at lr 1.0e-3; at the tuned 1.0e-4 it
+   COSTS 0.0103 (17.8 sigma over 3 seeds). Freezing was compensating for a
+   learning rate roughly 10x too high. What survives is the narrower claim it
+   was built on: the ZINC encoder is a poor flavour encoder.
 3. **A split mismatch invalidated the earlier A/B.** It is corrected below.
 
 ---
@@ -79,6 +102,11 @@ opposite directions inside a sum is not evidence that either causes the other.
 
 ## 2. Freezing — the clean test
 
+> **This section measures something real and draws the wrong conclusion from
+> it.** Every arm here runs at lr 1.0e-3, which the 2026-09-15 sweep showed is
+> roughly 10x too high. Freezing helps at that learning rate and hurts at the
+> tuned one. Read the numbers; discard the recommendation.
+
 The earlier ablation froze a ZINC-pretrained encoder and lost 6.7 points, and
 that was written up as evidence against freezing. It confounds two variables:
 *whether* the encoder is frozen, and *which* encoder is frozen.
@@ -126,6 +154,12 @@ Single seed. +0.0098 at 3.0 SE is suggestive, not settled — the SE describes
 query sampling, not seed-to-seed variance, which is typically larger. A 3-seed
 repeat is the check worth running before this drives a design decision.
 
+> **Both halves of that caveat turned out wrong, 2026-09-15.** Seed variance
+> was measured at sd 0.0005-0.0021 -- SMALLER than the 0.0033 query-sampling
+> SE, not larger. And the repeat that mattered was not more seeds at this
+> learning rate but a different learning rate: the confound was lr, and no
+> amount of seed replication at 1.0e-3 would have exposed it.
+
 The frozen arm is also 40% faster per epoch, so if it holds up it is cheaper as
 well as better.
 
@@ -148,9 +182,10 @@ chemistry-general rather than domain-specific.
 
 ## 4. What changes downstream
 
-- **Step 2 should test `freeze=[encoder]` from a flavour-trained warm start.**
-  The recommendation in `step1_zinc_transfer` §5 to never freeze in Step 2 was
-  derived from the ZINC-frozen run and does not generalise.
+- ~~**Step 2 should test `freeze=[encoder]` from a flavour-trained warm start.**~~
+  **Superseded 2026-09-15: do NOT freeze.** At the tuned lr it costs 0.0103
+  (17.8 sigma). `step1_zinc_transfer` §5's original "never freeze" advice lands
+  in the right place, though for a different reason than it gave.
 - **Drop the linker-reweighting thread.** It was flagged as "the most actionable
   open signal"; it was measured and it is inert.
 - **Report one split.** The mixed-split comparison survived review because the

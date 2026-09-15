@@ -9,6 +9,12 @@ degenerate.
 
 1. **Nothing is pathological for retrieval.** MAD stays well clear of collapse
    and feature correlation is low in every run.
+> **§2's lead is refuted, 2026-09-15.** Shallower does NOT help: conv3 is
+> -0.0170 H@1 (-5.2 SE) against the 5-layer default, conv7 is +0.0082. And
+> over-smoothing does not predict retrieval at all -- conv7 has the LOWEST
+> (0.249) and wide512 the HIGHEST (0.441), and wide512 wins by +0.0367. See
+> [hyperparameter_sweep_2026-09-15.md](hyperparameter_sweep_2026-09-15.md).
+
 2. **The ZINC encoder over-smooths noticeably more** than the flavour one —
    41% MAD decline against 33% — which is consistent with, though not proof of,
    its worse frozen retrieval.

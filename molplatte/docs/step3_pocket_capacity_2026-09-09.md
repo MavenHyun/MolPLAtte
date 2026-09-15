@@ -6,6 +6,14 @@ connected components of the (ligand, receptor) graph, so a held-out receptor is
 unseen. Fold 1 holds out TRPV1+TRPA1 entirely and is excluded from aggregates,
 as in [step2_pocket_results_2026-09-05.md](step2_pocket_results_2026-09-05.md).
 
+> **RETESTED AT WIDTH 512, 2026-09-15, and it got WORSE.** The null below was
+> measured on a capacity-starved encoder, so it was worth re-testing once that
+> changed. Pocket-trained 0.1119 vs no-finetune 0.1882 -- **-0.0763, worse in
+> 5 of 5 folds**, against -0.0325 at width 300. A better encoder gives a better
+> flavour representation, and 243 records damage a good one more than a weak
+> one. The conclusion strengthens rather than softens. See
+> [hyperparameter_sweep_2026-09-15.md](hyperparameter_sweep_2026-09-15.md).
+
 ## Headline
 
 **The pocket representation is informative. The task cannot use it.**
