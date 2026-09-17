@@ -88,6 +88,15 @@ class Arm:
     expect_trainable: Optional[int] = None
 
 
+# A CAPACITY LADDER, each rung with a shuffled twin.
+# The first pass tested only the extremes -- 1,056 params (inert) and 2.1M
+# (destructive). The rungs between them are where a pocket could plausibly be
+# used without collateral damage, and the query_projector is the specific place
+# the pocket vector enters the model. Every rung gets a permuted-pocket twin so
+# INFORMATION and CAPACITY stay separated at every capacity level; a rung that
+# beats its own twin is the only thing that would count as pockets working.
+_PROJ_NOT_QUERY = ["graph_projector", "node_projector", "rgroup_projector"]
+
 ARMS = [
     Arm("pf-enc-lr1e-3",     ["encoder"],              1e-3),
     Arm("pf-enc-lr1e-4",     ["encoder"],              1e-4),
@@ -95,6 +104,15 @@ ARMS = [
     Arm("pf-adapter-lr1e-3", ["encoder", "projectors"], 1e-3, expect_trainable=1056),
     Arm("pf-adapter-shuf",   ["encoder", "projectors"], 1e-4, shuffle_pocket=True,
         expect_trainable=1056),
+
+    # rung: query_projector + pocket trainable (~556k) -- THE GAP
+    Arm("pf-query-lr1e-4",      ["encoder"] + _PROJ_NOT_QUERY, 1e-4),
+    Arm("pf-query-shuf",        ["encoder"] + _PROJ_NOT_QUERY, 1e-4, shuffle_pocket=True),
+    # rung: nothing frozen at all (19.7M) -- the upper bound on capacity
+    Arm("pf-full-lr1e-4",       [],                            1e-4),
+    Arm("pf-full-shuf",         [],                            1e-4, shuffle_pocket=True),
+    # twin for the 2.1M rung, which never had one
+    Arm("pf-enc-lr1e-4-shuf",   ["encoder"],                   1e-4, shuffle_pocket=True),
 ]
 
 RETR = re.compile(r"RGroupLibraryRetrieval/test\]")
@@ -138,7 +156,7 @@ def train(arm: Arm, fold: int, gpu: str, dry: bool) -> str:
            f"data_module_kwargs.dataset_version={CORPUS}",
            f"+data_module_kwargs.cv_fold={fold}",
            f"lightning_module_kwargs.learning_rate={arm.lr}",
-           f"freeze=[{','.join(arm.freeze)}]",
+           *([] if not arm.freeze else [f"freeze=[{','.join(arm.freeze)}]"]),
            f"++trainer_kwargs.max_epochs={EPOCHS}",
            f"rgroup_library.vocab_path={VOCAB}",
            "rgroup_library.enable_after_epoch=0",

@@ -106,6 +106,57 @@ The remaining hypothesis worth testing is not a better pocket encoder but the
 **retrieval target**: an R-group keyed by WL hash cannot resolve individual
 contacts, so there may be nothing for a pocket to condition.
 
+## Follow-up: the full capacity ladder (added same day)
+
+The first pass tested only the extremes -- 1,056 params (inert) and 2.1M
+(destructive) -- and reported a null. That was under-tested: the configuration
+most likely to show a positive, a trainable `query_projector` (the module that
+actually consumes the pocket vector), had not been run. Every rung below now
+has its own permuted-pocket twin, so information and capacity are separated at
+each capacity level rather than only at the bottom.
+
+| rung | trainable | H@1 | vs base | H@10 | **vs its TWIN** |
+|---|---:|---:|---:|---:|---:|
+| baseline | — | 0.1715 | — | 0.3930 | — |
+| pocket only | 1,056 | 0.1715 | +0.0000 | 0.3941 | +0.0011 (+1.0σ) |
+| query_projector + pocket | 556,064 | 0.1510 | -0.0205 | 0.4058 | **+0.0000 (=)** |
+| all projectors + pocket | 2,135,072 | 0.1350 | -0.0365 | 0.4285 | **+0.0000 (=)** |
+| everything | 19.7M | 0.1448 | -0.0267 | 0.4299 | -0.0011 (-1.0σ) |
+
+**Every rung ties its own twin.** H@10 climbs steadily with capacity
+(0.3930 -> 0.4299) while H@1 falls (0.1715 -> 0.1350) -- but the shuffled twins
+climb and fall by exactly the same amounts. The whole capacity effect is
+capacity; none of it is pocket information. At the two middle rungs the real and
+permuted arms produce *different weights* (checkpoint hashes differ) yet
+*identical rankings* -- MRR matches to four decimals across all five folds.
+
+### Mechanism: the pocket columns are 40x weaker than flavour and never grow
+
+`query_projector` takes `[hidden 512 | flavour 24 | pocket 32]`. Mean |w| by
+block:
+
+| checkpoint | hidden | flavour | **pocket** | pocket/flavour |
+|---|---:|---:|---:|---:|
+| base (no finetune) | 0.1905 | 0.8281 | 0.0209 | 0.025 |
+| pocket only | 0.1905 | 0.8281 | 0.0209 | 0.025 |
+| query_projector + pocket | 0.1905 | 0.8281 | 0.0210 | 0.025 |
+| everything (19.7M trainable) | 0.1905 | 0.8281 | 0.0211 | 0.026 |
+
+The pocket block starts ~40x weaker than the flavour block and moves **<1% even
+when the entire 19.7M-parameter network is unfrozen**. The pocket cannot
+meaningfully reach the query embedding, which is why permuting it changes
+nothing.
+
+**This qualifies the null rather than strengthening it.** "Inert" is solid as an
+empirical result -- it holds across four capacity levels, each against its own
+control. But the mechanism is an initialisation-scale problem as much as an
+information problem: a pocket block this weak at init cannot discover signal
+even if signal existed, so the experiment is under-powered to prove *absence* of
+pocket information. The distinguishing experiment is to rescale the pocket block
+(or give it a separate, larger learning rate) and re-run the ladder; if it still
+ties its twins with the blocks at comparable magnitude, the null is mechanistic
+rather than an artifact.
+
 ## Reproduce
 
 ```bash
