@@ -250,6 +250,11 @@ class DataModuleConfig:
     #: carries signal (unchanged retrieval = ignored; collapse = informative
     #: or, for an R-group-derived vector, leaking).
     shuffle_condvec: bool = False
+    #: Permute ONLY the pocket half across molecules, leaving flavour intact.
+    #: Isolates the pocket's information from its capacity.
+    shuffle_pocket_only: bool = False
+    #: Width of the flavour prefix; the pocket half starts here.
+    pocket_offset: int = 24
     max_rgroups: int = 8
     #: Derive pre-mask joint chemistry for the assembly head. Costs a little
     #: CPU per __getitem__ and nothing on disk; off unless the head is enabled.
@@ -290,6 +295,8 @@ class MolPLAtteDataModule(pl.LightningDataModule):
             self.config.dataset_path,
             condvec_dim=self.config.condvec_dim,
             shuffle_condvec=self.config.shuffle_condvec,
+            shuffle_pocket_only=self.config.shuffle_pocket_only,
+            pocket_offset=self.config.pocket_offset,
             max_rgroups=self.config.max_rgroups,
             seed=self.config.seed,
             need_assembly_targets=self.config.need_assembly_targets,

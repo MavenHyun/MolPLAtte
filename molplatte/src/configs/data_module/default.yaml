@@ -50,6 +50,11 @@ data_module_kwargs:
   # condvec that collapse would indicate LEAKAGE, which is how the original
   # 97-bit fragment vector should have been caught.
   shuffle_condvec:        false
+  # Permute ONLY the pocket half across molecules, leaving the flavour bits
+  # intact. shuffle_condvec permutes all 1304 columns and so destroys flavour
+  # too, which cannot isolate the pocket's contribution.
+  shuffle_pocket_only:    false
+  pocket_offset:          24
   # Cap on detached R-groups per instance, i.e. rows contributed to the
   # per-linker retrieval loss.
   max_rgroups:            8

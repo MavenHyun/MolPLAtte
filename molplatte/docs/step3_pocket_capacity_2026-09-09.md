@@ -1,5 +1,12 @@
 # STEP 3 — why pocket conditioning is inert
 
+> **SUPERSEDED IN PART (2026-09-17).** The negative result here is
+> confounded by catastrophic forgetting: the runs left 2.1M parameters
+> trainable at the sweep's worst learning rate. With the flavour pathway
+> frozen the loss vanishes (0.0000 on all folds), though pocket
+> conditioning is then *inert* rather than useful. See
+> [pocket_forgetting_2026-09-17.md](pocket_forgetting_2026-09-17.md).
+
 Runs of 2026-09-09, seed 911012, corpus `tastepocket_corpus` (243 records),
 scored against the 91,935-row union library (effective size 946). Folds are
 connected components of the (ligand, receptor) graph, so a held-out receptor is

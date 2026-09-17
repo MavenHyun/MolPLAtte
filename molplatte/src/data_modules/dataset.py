@@ -115,6 +115,8 @@ class MolPLAtteDataset(Dataset):
         dataset_path: str | Path,
         condvec_dim: int = 97,
         shuffle_condvec: bool = False,
+        shuffle_pocket_only: bool = False,
+        pocket_offset: int = 24,
         max_rgroups: int = 8,
         seed: Optional[int] = None,
         need_assembly_targets: bool = False,
@@ -145,10 +147,15 @@ class MolPLAtteDataset(Dataset):
         self.method: str = meta.get("method", "unknown")
         self.condvec_dim = condvec_dim
         self.shuffle_condvec = bool(shuffle_condvec)
+        # Pocket-only shuffle: permute the POCKET half across molecules and leave
+        # the flavour bits intact. shuffle_condvec permutes all 1304 columns,
+        # which destroys flavour too and cannot isolate the pocket's contribution.
+        self.shuffle_pocket_only = bool(shuffle_pocket_only)
+        self.pocket_offset = int(pocket_offset)
         self.max_rgroups = max_rgroups
         self.need_assembly_targets = need_assembly_targets
         self.ids: List[str] = list(meta["ids"])
-        if self.shuffle_condvec:
+        if self.shuffle_condvec or self.shuffle_pocket_only:
             # Built HERE, after self.ids exists. Seeded and fixed, so the wrong
             # condition is stable across epochs rather than resampled each pass.
             import numpy as _np
@@ -374,7 +381,7 @@ class MolPLAtteDataset(Dataset):
 
         detached = instance.detached_indices
         condvecs = torch.as_tensor(decomp["rgroup_condvecs"])[list(detached)].float()
-        if self.shuffle_condvec:
+        if self.shuffle_condvec or self.shuffle_pocket_only:
             # SHUFFLE TEST. Replace this instance's condition with one drawn from
             # a different molecule, deterministically by instance index so the
             # permutation is fixed across epochs rather than resampled.
@@ -399,7 +406,17 @@ class MolPLAtteDataset(Dataset):
                 pool = torch.as_tensor(alt["decompositions"][0]["rgroup_condvecs"]).float()
                 if pool.numel():
                     row = pool[_k % pool.shape[0]]
-                    condvecs = row.unsqueeze(0).repeat(condvecs.shape[0], 1)
+                    if self.shuffle_pocket_only:
+                        # Keep this molecule's flavour bits; replace only the
+                        # pocket half, so the arm differs from the real one in
+                        # POCKET INFORMATION and nothing else.
+                        off = self.pocket_offset
+                        if row.shape[0] > off and condvecs.shape[1] > off:
+                            condvecs = condvecs.clone()
+                            condvecs[:, off:] = row[off:].unsqueeze(0).repeat(
+                                condvecs.shape[0], 1)
+                    else:
+                        condvecs = row.unsqueeze(0).repeat(condvecs.shape[0], 1)
             except (KeyError, IndexError, FileNotFoundError):
                 pass
         hashes = [decomp["rgroup_hashes"][i] for i in detached]
