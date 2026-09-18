@@ -55,7 +55,7 @@ CKPT = HOME / "checkpoints" / "molplatte"
 LOGS = CKPT / "hplogs"
 RESULTS = CKPT / "pocket_forgetting_results.csv"
 
-BASE_CKPT = CKPT / "exp-wide512-pocket.pt"
+BASE_CKPT = CKPT / "exp-wide512-pocket.pt"   # overridable via --base
 CORPUS = "tastepocket_corpus"
 VOCAB = DATA / "union_vocab" / "base-full__crossdocked__tastepocket" / "rgroup_vocab.pkl.gz"
 BASIS = DATA / "pocket_basis"
@@ -217,8 +217,19 @@ def main() -> int:
     ap.add_argument("--gpu", default="1")
     ap.add_argument("--dry", action="store_true")
     ap.add_argument("--folds", default="0,1,2,3,4")
+    ap.add_argument("--base", default=None, help="override the init checkpoint")
+    ap.add_argument("--prefix", default=None, help="rename arms, e.g. pfr- for the rescaled ladder")
+    ap.add_argument("--results", default=None)
     a = ap.parse_args()
     folds = [int(x) for x in a.folds.split(",")]
+    global BASE_CKPT, RESULTS
+    if a.base:
+        BASE_CKPT = Path(a.base)
+    if a.results:
+        RESULTS = Path(a.results)
+    if a.prefix:
+        for arm in ARMS:
+            arm.name = arm.name.replace("pf-", a.prefix, 1)
     assert BASE_CKPT.exists(), f"no base checkpoint {BASE_CKPT}"
 
     rows = []

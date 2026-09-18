@@ -157,9 +157,86 @@ pocket information. The distinguishing experiment is to rescale the pocket block
 ties its twins with the blocks at comparable magnitude, the null is mechanistic
 rather than an artifact.
 
+## Rescaling the pocket block: the caveat resolves, and my mechanism was wrong
+
+The section above closed by flagging that the pocket block sat 40x weaker than
+the flavour block, so the null might be an initialisation artifact rather than
+an absence of signal, and proposed rescaling as the distinguishing test. The
+rescale was run (`scripts/rescale_pocket_block.py`, x39.62 to flavour parity)
+and the whole ladder repeated. **The proposed mechanism was wrong, and the
+caveat dissolves for a different reason than expected.**
+
+The stated reasoning was: the gradient reaching the zero-init adapter is
+proportional to the query projector's pocket columns, so weak columns starve the
+adapter. That is true of SGD. **This model trains with Adam**
+(`lightning_modules/base.py:103`), which divides the update by the gradient's
+own RMS and is therefore *invariant to gradient rescaling*. Multiplying the
+columns by 39.62 multiplies the adapter's gradient by 39.62 and its update by 1.
+
+Measured, and unambiguous:
+
+| rung | adapter max\|w\|, scale 1 | adapter max\|w\|, scale 39.6 | ratio |
+|---|---:|---:|---:|
+| pocket only | 0.000685 | 0.000684 | **1.0x** |
+| query_projector + pocket | 0.000690 | 0.000688 | **1.0x** |
+| all projectors + pocket | 0.001044 | 0.001040 | **1.0x** |
+| everything | 0.000912 | 0.000920 | **1.0x** |
+
+The Adam signature is visible directly in the scale-1 ladder: `max|w|/lr` is
+6.8 at lr 1e-4 and 6.9 at lr 1e-3 -- the adapter moves a fixed number of
+*learning-rate-sized* steps regardless of how large the gradient is.
+
+### The intervention that does work was already run
+
+Adam is invariant to gradient scale but **not** to learning rate. The lever I
+should have reached for was lr, and `adapter-lr1e-3` had already pulled it: a
+10x larger adapter excursion (max\|w\| 0.000685 -> 0.006851). It ties its twin
+and the baseline exactly (+0.0000 H@1). So the "the adapter was too small to
+find out" objection was already answered before the rescale was run.
+
+### The rescaled ladder as independent replication
+
+| rung | params | scale 1: ΔH@1 vs twin | scale 39.6: ΔH@1 vs twin | scale 39.6: ΔH@10 vs twin |
+|---|---:|---:|---:|---:|
+| pocket only | 1,056 | +0.0000 (=) | -0.0014 (-1.0σ) | +0.0039 (+1.4σ) |
+| query_projector + pocket | 556,064 | +0.0000 (=) | +0.0014 (+1.0σ) | +0.0000 (=) |
+| all projectors + pocket | 2,135,072 | +0.0000 (=) | -0.0032 (-1.5σ) | -0.0011 (-1.0σ) |
+| everything | 19.7M | +0.0025 (+1.6σ) | +0.0014 (+1.0σ) | +0.0025 (+1.6σ) |
+
+Eight rung-versus-twin comparisons across the two ladders. Every one is within
++-0.0032 H@1, none exceeds 1.6σ, and the signs are mixed -- the distribution of
+a quantity whose true value is zero.
+
+The rescale was also verified prediction-neutral before use: because
+PocketConditioning's output is zero-init, the pocket slice is exactly zero at
+initialisation and these columns multiply zero. The rescaled baseline reproduces
+the original on all five folds (0.1803 / 0.1026 / 0.1773 / 0.1631 / 0.2340).
+
+### Where this leaves it
+
+The initialisation-scale caveat is retired: under Adam the block magnitude
+cannot be the limiter, and the lever that *can* change adapter movement (lr) was
+tested at 10x with a null. What actually bounds the adapter is that the pocket
+never improves validation loss, so the best checkpoint is selected within the
+first few epochs -- and that is the finding, not an artifact of it.
+
+The honest residual is narrow: no run trained past early stopping with a
+pocket-only warm-up. On 269 records that is far more likely to overfit than to
+reveal signal, and it would have to overturn a consistent result from four
+independent directions -- sequence embeddings, 3D geometry, typed interactions,
+and supervised finetuning at four capacity levels against matched controls.
+
 ## Reproduce
 
 ```bash
 python molplatte/src/scripts/run_pocket_forgetting_cv.py --gpu 1 --folds 0,1,2,3,4
+
+# rescaled ladder
+python molplatte/src/scripts/rescale_pocket_block.py \
+  ~/checkpoints/molplatte/exp-wide512-pocket.pt \
+  --out ~/checkpoints/molplatte/exp-wide512-pocket-rescaled.pt
+python molplatte/src/scripts/run_pocket_forgetting_cv.py --gpu 1 --folds 0,1,2,3,4 \
+  --base ~/checkpoints/molplatte/exp-wide512-pocket-rescaled.pt --prefix pfr- \
+  --results ~/checkpoints/molplatte/pocket_rescaled_results.csv
 # -> ~/checkpoints/molplatte/pocket_forgetting_results.csv
 ```
