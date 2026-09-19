@@ -1,5 +1,11 @@
 # The step-3 pocket result was catastrophic forgetting. Correcting it turns "harmful" into "inert".
 
+> **PARTLY RETRACTED (2026-09-19).** The closing suggestion that the
+> RETRIEVAL TARGET is the remaining problem is refuted: pockets predict
+> R-groups as well as whole ligands (+0.1786 vs +0.1782), with 15x
+> enrichment on exact WL-hash overlap. See
+> [rgroup_granularity_probe_2026-09-19.md](rgroup_granularity_probe_2026-09-19.md).
+
 **Both halves of this matter.** The September finding -- pocket finetuning costs
 -0.0763 H@1 on unseen receptors -- was **confounded**: that run left 2.1M
 parameters adapting to 269 records at the sweep's *worst* learning rate. When

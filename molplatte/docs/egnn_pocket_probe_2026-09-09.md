@@ -1,5 +1,11 @@
 # Does 3D geometry beat the sequence pocket embedding?
 
+> **PARTLY RETRACTED (2026-09-19).** The closing suggestion that the
+> RETRIEVAL TARGET is the remaining problem is refuted: pockets predict
+> R-groups as well as whole ligands (+0.1786 vs +0.1782), with 15x
+> enrichment on exact WL-hash overlap. See
+> [rgroup_granularity_probe_2026-09-19.md](rgroup_granularity_probe_2026-09-19.md).
+
 Run 2026-09-09 on the 1,255 tastepocket sites, scored with the probe from
 [step3_pocket_capacity](step3_pocket_capacity_2026-09-09.md): for each held-out
 pocket, take the nearest OTHER pocket by cosine — restricted to a different

@@ -1,5 +1,11 @@
 # Typed non-covalent interactions do not beat the sequence pocket embedding
 
+> **PARTLY RETRACTED (2026-09-19).** The closing suggestion that the
+> RETRIEVAL TARGET is the remaining problem is refuted: pockets predict
+> R-groups as well as whole ligands (+0.1786 vs +0.1782), with 15x
+> enrichment on exact WL-hash overlap. See
+> [rgroup_granularity_probe_2026-09-19.md](rgroup_granularity_probe_2026-09-19.md).
+
 **Do not build an NCI-based pocket encoder for R-group retrieval.** Typed
 interaction fingerprints fail the same gate the EGNN failed, and they fail it
 harder: the descriptor carries **no cross-family signal at all** (-0.0014,
