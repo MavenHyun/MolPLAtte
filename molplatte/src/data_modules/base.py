@@ -398,7 +398,13 @@ class MolPLAtteDataModule(pl.LightningDataModule):
             num_workers=workers,
             collate_fn=collate_molplatte,
             pin_memory=self.config.pin_memory,
-            drop_last=shuffle,
+            # drop_last=True on a split SMALLER than one batch silently yields
+            # ZERO batches, and Lightning reports only "No training batches" --
+            # the run completes, writes its epoch-0 checkpoint, and every metric
+            # afterwards describes an untrained model. That happened to a whole
+            # 5-fold ladder: 3 folds trained on nothing, 2 on a single batch.
+            # Keep the partial batch when the split cannot fill one.
+            drop_last=shuffle and len(split) > self.config.batch_size,
         )
         if workers > 0:
             kwargs["persistent_workers"] = self.config.persistent_workers

@@ -142,7 +142,7 @@ def trainable_from_log(log: Path) -> Optional[int]:
     return total
 
 
-def train(arm: Arm, fold: int, gpu: str, dry: bool) -> str:
+def train(arm: Arm, fold: int, gpu: str, dry: bool, batch_size=None) -> str:
     exp = f"{arm.name}-f{fold}"
     log = LOGS / f"{exp}.log"
     if log.exists():
@@ -158,6 +158,7 @@ def train(arm: Arm, fold: int, gpu: str, dry: bool) -> str:
            f"lightning_module_kwargs.learning_rate={arm.lr}",
            *([] if not arm.freeze else [f"freeze=[{','.join(arm.freeze)}]"]),
            f"++trainer_kwargs.max_epochs={EPOCHS}",
+           *([] if batch_size is None else [f"data_module_kwargs.batch_size={batch_size}"]),
            f"rgroup_library.vocab_path={VOCAB}",
            "rgroup_library.enable_after_epoch=0",
            "wandb.project=null"] + model_kwargs(fold)
@@ -220,6 +221,10 @@ def main() -> int:
     ap.add_argument("--base", default=None, help="override the init checkpoint")
     ap.add_argument("--prefix", default=None, help="rename arms, e.g. pfr- for the rescaled ladder")
     ap.add_argument("--results", default=None)
+    ap.add_argument("--batch-size", type=int, default=None,
+                    help="training batch size. The default 512 gives ONE batch per "
+                         "epoch on this corpus (~20 gradient steps per run); a smaller "
+                         "value trades in-batch negatives for optimisation steps.")
     a = ap.parse_args()
     folds = [int(x) for x in a.folds.split(",")]
     global BASE_CKPT, RESULTS
@@ -227,7 +232,12 @@ def main() -> int:
         BASE_CKPT = Path(a.base)
     if a.results:
         RESULTS = Path(a.results)
+    # The baseline tags MUST carry the prefix too. Without it a rerun on new
+    # fold definitions finds the previous run's eval logs, skips re-scoring, and
+    # silently compares new arms against a baseline computed on OLD folds.
+    tag_prefix = "pf-"
     if a.prefix:
+        tag_prefix = a.prefix
         for arm in ARMS:
             arm.name = arm.name.replace("pf-", a.prefix, 1)
     assert BASE_CKPT.exists(), f"no base checkpoint {BASE_CKPT}"
@@ -237,7 +247,7 @@ def main() -> int:
     print("== baseline: the base checkpoint, no finetuning at all")
     base = {}
     for k in folds:
-        r = score(BASE_CKPT, k, f"pf-baseline-f{k}", a.gpu, dry=a.dry)
+        r = score(BASE_CKPT, k, f"{tag_prefix}baseline-f{k}", a.gpu, dry=a.dry)
         base[k] = r.get("H@1")
         print(f"  fold {k}: H@1={r.get('H@1')}  N={r.get('N')}")
         rows.append(("baseline", k, r, None))
@@ -246,7 +256,7 @@ def main() -> int:
     # the line above, the UNTRAINED pocket path is already doing something
     print("== baseline with pocket permuted (zero-init sanity check)")
     for k in folds:
-        r = score(BASE_CKPT, k, f"pf-baseline-shuf-f{k}", a.gpu,
+        r = score(BASE_CKPT, k, f"{tag_prefix}baseline-shuf-f{k}", a.gpu,
                   shuffle_pocket=True, dry=a.dry)
         print(f"  fold {k}: H@1={r.get('H@1')}")
         rows.append(("baseline-shuf", k, r, None))
@@ -255,7 +265,7 @@ def main() -> int:
         print(f"\n== {arm.name}   freeze={arm.freeze} lr={arm.lr}"
               f"{' SHUFFLED-POCKET' if arm.shuffle_pocket else ''}")
         for k in folds:
-            exp = train(arm, k, a.gpu, a.dry)
+            exp = train(arm, k, a.gpu, a.dry, a.batch_size)
             if a.dry:
                 continue
             ntr = trainable_from_log(LOGS / f"{exp}.log")
