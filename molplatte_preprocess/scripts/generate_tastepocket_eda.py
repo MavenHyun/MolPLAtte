@@ -177,11 +177,27 @@ def main() -> int:
                    for r in recs if r["mol_id"] in ds]
         insts = [int(r["meta"].get("n_instances") or 0) for r in recs]
 
+        # Computed, not written down. The docstring promises nothing is copied
+        # from a previous report; these three sentences were the exception, and
+        # after the set was rebuilt they contradicted the table directly below
+        # them (prose said 269 records, table said 201).
+        _t1 = _sites = 0
+        try:
+            _cur = json.loads((Path.home() / "datasets/tastepocket/data/taste_odor_pdb.json").read_text())
+            _t1 = sum(1 for e in _cur if e.get("tier") == "T1_ligand_complex")
+        except Exception:
+            pass
+        try:
+            _sites = sum(1 for _ in open(ROOT / "tastepocket" / "pockets.jsonl"))
+        except Exception:
+            pass
+
         p = Page("tastepocket", "the pocket-conditioned finetuning set, instance by instance")
         p.text(
-            "343 T1 chemosensory complexes from the PDB become 269 (ligand, receptor)\n"
-            "records, of which 243 decompose. Every record carries a 24-bit flavour\n"
-            "vector and a 1280-d ESM-2 embedding of the 10 A pocket around its ligand.",
+            f"{_t1} T1 chemosensory complexes from the PDB become {len(ds)} (ligand,\n"
+            f"receptor) records, of which {len(recs)} decompose. Every record carries a\n"
+            "24-bit flavour vector and a 1280-d ESM-2 embedding of the 10 A pocket\n"
+            "around its ligand. Insect chemoreception is excluded.",
             gap=1.6)
         p.h2("What is in it")
         rows = [
@@ -207,15 +223,18 @@ def main() -> int:
 
         p.h2("Why the counts are what they are")
         p.text(
-            "One record per (ligand, RECEPTOR), not per pocket site. 1,255 sites collapse\n"
-            "to 269 because a homotetramer deposits the same ligand four times. Counting\n"
-            "those separately would inflate the R-group frequency prior unevenly -- and\n"
-            "that prior is both what Hit@K is judged against and what the logQ correction\n"
-            "subtracts, so inflating it moves the number being optimised.\n\n"
-            "The 1,255 is itself a correction. Selecting ligand copies by residue name\n"
-            "alone matched backbone residues too: mmCIF records free amino acids as ATOM\n"
-            "rather than HETATM, so a `resname TRP` match swept up all 14 tryptophans in\n"
-            "the protein. That produced 2,269 sites, 445 of them 'tryptophan'.",
+            f"One record per (ligand, RECEPTOR), not per pocket site. {_sites:,} sites\n"
+            f"collapse to {len(ds)} because a homotetramer deposits the same ligand four\n"
+            "times. Counting those separately would inflate the R-group frequency prior\n"
+            "unevenly -- and that prior is both what Hit@K is judged against and what the\n"
+            "logQ correction subtracts, so inflating it moves the number being optimised.\n\n"
+            "Two historical corrections sit behind the site count. Selecting ligand copies\n"
+            "by residue name alone matched backbone residues too: mmCIF records free amino\n"
+            "acids as ATOM rather than HETATM, so a `resname TRP` match swept up all 14\n"
+            "tryptophans in the protein -- 2,269 sites, 445 of them 'tryptophan'. And the\n"
+            "set was later filtered by SENSOR ORGANISM to drop insect chemoreception; the\n"
+            "family labels could not be used for that, since 24 bovine, porcine, canine,\n"
+            "rat and human lipocalins were filed under the insect OBP family.",
             color=MUTE, gap=1.4)
         p.save(pdf)
 
@@ -247,8 +266,8 @@ def main() -> int:
             "(ligand, receptor) pair is a separate datapoint.\n\n"
             f"{widest.split(' –')[0].split(' -')[0]} is the reverse: {len(fam_lig[widest])} distinct "
             f"ligands over {fam_rec[widest]} records, the widest\n"
-            "chemistry in the set -- and the least labellable, since insect pheromones\n"
-            "have no human flavour descriptor.",
+            "chemistry in the set. Capsaicinoids, vanilloids and resiniferatoxin\n"
+            "analogues -- pungency stimuli whose human descriptors are sparse.",
             color=MUTE, gap=1.2)
         org = Counter(org_of.values()).most_common(10)
         ax = p.axes(.115, left=.42, width=.50)
@@ -296,7 +315,7 @@ def main() -> int:
             "A fold holds out whole connected components of the (ligand, receptor)\n"
             "bipartite graph, so a held-out receptor's ligands are absent from training\n"
             "too. Splitting by receptor and patching ligand conflicts afterwards cost 64\n"
-            "of 269 records and still left the halves unbalanced.\n\n"
+            "of the then-269 records and still left the halves unbalanced.\n\n"
             "This cannot be random. Pooled ESM-2 pocket embeddings identify the receptor\n"
             "family with 98.5% 1-NN accuracy across different PDB entries, against a\n"
             "27.4% majority baseline -- a random split puts the same protein on both\n"
@@ -368,11 +387,13 @@ def main() -> int:
         p.text(
             f"{n_lab} of {len(recs)} records ({100*n_lab/len(recs):.0f}%) carry a real label.\n\n"
             "The rest is not a preprocessing failure. Of the molecules the tables could\n"
-            "not resolve, most are modulators, lipids or cofactors with no percept at\n"
-            "all, and 19 more are insect pheromones -- bombykol, bombykal, honeybee queen\n"
-            "mandibular pheromone. Genuine stimuli with no human descriptor. Insect OBP is\n"
-            "the largest family here, so a large part of this set is unlabellable in a\n"
-            "22-term human vocabulary by construction.\n\n"
+            "not resolve, most are modulators, lipids or cofactors with no percept at all:\n"
+            "synthetic channel agonists, membrane phospholipids from cryo-EM structures,\n"
+            "and crystallisation additives that survived filtering. A pocket-bound ligand\n"
+            "is not automatically a tastant, and forcing a descriptor onto one would put\n"
+            "noise into the half of the condvec that demonstrably works.\n\n"
+            "Insect chemoreception -- previously the largest block here and unlabellable\n"
+            "in a human vocabulary by construction -- has been removed from the set.\n\n"
             "The LLM pass sees the MOLECULE ONLY -- name and SMILES, never the receptor.\n"
             "Told 'this binds TRPM8' it would answer 'cooling', and the flavour half of\n"
             "the condvec would become a re-encoding of the pocket half: conditioning would\n"
