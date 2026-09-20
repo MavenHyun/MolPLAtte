@@ -93,6 +93,65 @@ pocket documents.** Any comparison must re-score the baseline on v2 folds.
 ~/datasets/tastepocket/data/taste_odor_pdb.json     merged (backup: .bak-2026-09-20)
 ```
 
+## Revision: insect structures removed (same day)
+
+Insect chemoreception was dropped on instruction; the flavour work is
+human-facing. Filtering is by **sensor organism, not by family label** --
+see below for why that distinction was load-bearing.
+
+| | v2 (with insect) | **v3 (final)** |
+|---|---:|---:|
+| pocket instances | 1,477 | **1,288** |
+| PDB entries | 356 | **271** |
+| receptor proteins | 106 | **73** |
+| families | 19 | **15** |
+| corpus records | 263 | **201** |
+| decompositions | 794 | **610** |
+| union R-group vocabulary | 91,943 | **91,941** |
+
+Removed: 189 pockets across 85 PDB entries -- insect OBP 110, gustatory
+receptor 48, insect OR/Orco/IR 22, CSP 9. Odour coverage takes the hit, as
+expected: most odour structures were insect OBPs, leaving vertebrate lipocalins
+and olfactory GPCRs.
+
+### Two defects the filter exposed
+
+**The family labels could not be filtered on.** 24 entries were filed under
+`OBP – insect odorant/pheromone binding protein` but are **bovine, porcine,
+canine, rat and human** lipocalins (1PBO, 1E06, 1OBP, 8AEH-J, 3FIQ, 4RUN, ...).
+A name-based filter would have deleted genuine vertebrate odorant carriers as
+"insect". They are now relabelled to the vertebrate family in
+`taste_odor_pdb.json`, each carrying a `relabelled` provenance note.
+
+**The expansion entries had no organism at all.** `extract_tastepocket_pockets`
+reads `sensor_organism` -- the field naming the RECEPTOR chain as distinct from
+G-protein subunits and fusion partners -- and the entries built from the PDB
+search only carried `organisms`. 232 pockets, including every TRPV3 record, had
+a blank organism and would have been invisible to any organism filter. Fixed by
+resolving the sensor chain per entry against the family keyword while excluding
+G-proteins, lysozyme, BRIL, GFP and nanobody partners.
+
+### Verified
+
+- corpus settings differ from the original in **0 fields**
+- corpus loads: 610 items, condvec 1304
+- `shuffle_pocket_only` control: flavour preserved 60/60, pocket changed 60/60
+- **insect pockets remaining: 0**
+- PCA basis orthonormal to 2.2e-15, variance retained 97.7-98.4%
+
+### Final paths
+
+```
+~/preprocessed/molplatte/tastepocket_v3/          pockets, ligands, labels, embeddings, folds
+~/preprocessed/molplatte/tastepocket_corpus_v3/   corpus + folds.json + rgroup_vocab
+~/preprocessed/molplatte/union_vocab/base-full__crossdocked__tastepocket_v3/
+~/preprocessed/molplatte/pocket_basis_v3/
+```
+
+v2 is retained as the with-insect intermediate. Originals untouched.
+**Folds were recomputed again**, so v3 numbers are comparable neither to the
+original 5-fold results nor to v2.
+
 ## Reproduce
 
 ```bash
