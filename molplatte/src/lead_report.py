@@ -680,7 +680,9 @@ def run_lead_optimization(input_compound, lead_optimizer, flavor_condition,
                           retro_timeout: int = 3600,
                           ligand_resname: Optional[str] = None,
                           ligand_resname_smiles: Optional[str] = None,
-                          pose_dir: Optional[str | Path] = None
+                          pose_dir: Optional[str | Path] = None,
+                          panel: bool = False,
+                          panel_all: bool = False
                           ) -> LeadOptimizationReport:
     """Retrieve, assemble, score, visualise.
 
@@ -838,6 +840,21 @@ def run_lead_optimization(input_compound, lead_optimizer, flavor_condition,
                                       poses=pose_files,
                                       receptor_atoms=receptor_atoms,
                                       receptor_pdb=receptor_pdb)
+
+    # ---- receptor panel -------------------------------------------------
+    # Dock every product into the HUMAN receptors that mediate the requested
+    # percept. This is independent of the model -- the optimiser never saw a
+    # structure -- so it is free to disagree with retrieval_score, which is the
+    # only reason it is worth computing. Every panel receptor has been validated
+    # by redocking its own crystal ligand at median <= 2.5 A over three seeds.
+    if panel and table is not None and len(table):
+        try:
+            import receptor_panel as _rp
+            table = _rp.panel_columns(table, "product", labels,
+                                      all_receptors=panel_all,
+                                      exhaustiveness=exhaustiveness)
+        except Exception as exc:  # noqa: BLE001 - a missing panel is not a failed run
+            logger.warning("receptor panel skipped: %s", exc)
 
     return LeadOptimizationReport(
         input_smiles=smiles, flavor_condition=labels, reference=reference,

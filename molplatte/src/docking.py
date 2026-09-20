@@ -103,6 +103,7 @@ class VinaDocker:
     center: Tuple[float, float, float] = (0.0, 0.0, 0.0)
     box_size: Tuple[float, float, float] = (20.0, 20.0, 20.0)
     exhaustiveness: int = 8
+    seed: int = 0xC0FFEE
     _vina: object = None
     _xtal: Optional[np.ndarray] = None
     _pocket_atoms: Optional[np.ndarray] = None
@@ -113,6 +114,7 @@ class VinaDocker:
                        ligand_resname: Optional[str] = None,
                        pad: float = 10.0, min_box: float = 18.0,
                        exhaustiveness: int = 8,
+                       seed: int = 0xC0FFEE,
                        workdir: Optional[Path] = None) -> "VinaDocker":
         """Prepare a receptor from a .cif/.pdb and box it on its crystal ligand.
 
@@ -168,7 +170,8 @@ class VinaDocker:
                   receptor_pdbqt=rec_qt,
                   center=tuple(map(float, centre)),
                   box_size=tuple(map(float, size)),
-                  exhaustiveness=exhaustiveness)
+                  exhaustiveness=exhaustiveness,
+                  seed=seed)
         obj._xtal = xtal
         # Receptor heavy atoms near the site, for drawing the pose in context.
         try:
@@ -183,7 +186,12 @@ class VinaDocker:
         if self._vina is None:
             from vina import Vina
 
-            v = Vina(sf_name="vina", verbosity=0)
+            # SEEDED. Without this Vina samples from a fresh random seed every
+            # run, so the same compound against the same receptor gives a
+            # different score each time -- and a redock control becomes a coin
+            # flip rather than a check (one entry here scored 1.45 A and then
+            # 5.38 A on identical inputs).
+            v = Vina(sf_name="vina", verbosity=0, seed=self.seed)
             v.set_receptor(str(self.receptor_pdbqt))
             v.compute_vina_maps(center=list(self.center),
                                 box_size=list(self.box_size))
