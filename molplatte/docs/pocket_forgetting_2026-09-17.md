@@ -232,6 +232,43 @@ reveal signal, and it would have to overturn a consistent result from four
 independent directions -- sequence embeddings, 3D geometry, typed interactions,
 and supervised finetuning at four capacity levels against matched controls.
 
+## Re-run on the v3 dataset, with training that actually happened (2026-09-21)
+
+Everything above was measured on runs that took **~20-29 gradient steps**. With
+`batch_size=512` and `drop_last=True` the per-fold training split (561-607
+items) yielded exactly ONE batch per epoch. The `max|w|/lr = 6.8` signature
+reported above as Adam scale-invariance is really ~7 optimiser steps.
+
+Worse, the first v3 attempt trained on **nothing**: removing insect
+chemoreception cut the split to 429-512 items, below one batch, so three of five
+folds produced zero batches and every arm wrote a bit-identical epoch-0
+checkpoint. Lightning reported only `No training batches`; all 60 evals
+completed and faithfully measured an untrained network. Fixed in `f9ff3e4`
+(`drop_last` now keeps the partial batch) and re-run at `batch_size=128`,
+~4 batches/epoch.
+
+| rung | params | H@1 | vs base | **ΔH@1 vs TWIN** |
+|---|---:|---:|---:|---:|
+| baseline (no finetune) | — | 0.1794 | — | — |
+| pocket only | 1,056 | 0.1794 | +0.0000 | **+0.0000 (=)** |
+| query_projector + pocket | 556,064 | 0.1376 | -0.0419 | **+0.0000 (=)** |
+| all projectors + pocket | 2,135,072 | 0.1264 | -0.0530 | **+0.0000 (=)** |
+| everything | 19,665,863 | 0.1328 | -0.0467 | -0.0005 (-0.1σ) |
+| *enc-lr1e-3 (original config)* | 2,135,072 | 0.1024 | -0.0770 | — |
+
+**The twins now provably trained differently.** Real vs permuted checkpoints
+differ in 2 / 10 / 34 / 130 of 138 tensors as capacity rises, and every arm
+differs from the base checkpoint. The model distinguishes the pockets and still
+extracts nothing: different weights, identical rankings.
+
+**Forgetting scales cleanly with trainable capacity** (-0.0419 -> -0.0530 from
+556k to 2.1M params) and only the 1,056-param adapter, which cannot move the
+flavour pathway, leaves the baseline untouched.
+
+Independent replication: different dataset (insect removed, TRPV3 added),
+recomputed folds, different batch size, ~6x the gradient steps. Twelve
+rung-versus-twin comparisons across three ladders, all null.
+
 ## Reproduce
 
 ```bash
