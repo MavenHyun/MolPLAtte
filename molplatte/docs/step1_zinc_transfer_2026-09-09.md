@@ -1,5 +1,11 @@
 # Does ZINC pretraining help? — STEP 1 → STEP 2 transfer
 
+> **RETESTED AND CONFIRMED (2026-09-21).** This verdict was taken at
+> hidden_dim=300 / lr=1e-3, before the tuning sweep. Retested at width 512
+> on a molecule-level split with a train-only prior: ZINC costs **-0.0653
+> H@1**, five times the -0.0125 reported here. See
+> [zinc_retest_2026-09-21.md](zinc_retest_2026-09-21.md).
+
 > **AMENDED 2026-09-09.** Three corrections, all from
 > [loss_reweighting_and_freezing_2026-09-09.md](loss_reweighting_and_freezing_2026-09-09.md):
 >
