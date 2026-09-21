@@ -374,6 +374,16 @@ def _score_caption(row) -> str:
         lines.append(f"vina {row['vina_score']:+.2f} kcal/mol"
                      + (f"  ({row['dvina']:+.2f} vs input)"
                         if row.get("dvina") is not None else ""))
+    # Receptor panel, if the run computed one. Named receptors rather than a
+    # bare number: "which receptor" is the whole point of docking a flavour
+    # compound into more than one.
+    if row.get("panel_best") is not None:
+        pk = sorted(k for k in row if isinstance(k, str) and k.startswith("vina_"))
+        parts = [f"{k.replace('vina_', '')} {row[k]:+.2f}"
+                 for k in pk if isinstance(row.get(k), (int, float))]
+        if parts:
+            lines.append("panel  " + "   ".join(parts)
+                         + f"   best {row.get('panel_best_receptor', '?')}")
     if row.get("retro_solved") is not None:
         st = row.get("retro_steps")
         nr = row.get("retro_routes")

@@ -212,6 +212,16 @@ def render_html(report, out_path: str | Path, *, title: Optional[str] = None,
              ("NP", "NPScore")]
     if has_vina:
         cols.append(("vina", "vina_score"))
+    # Receptor panel: one column per receptor the requested percept maps to,
+    # plus the best across them. Discovered by prefix rather than hard-coded,
+    # because which receptors appear depends on the flavour asked for -- the
+    # panel computed these and they were silently dropped at render time.
+    panel_keys = sorted({k for r in rows for k in r
+                         if isinstance(k, str) and k.startswith("vina_")})
+    for k in panel_keys:
+        cols.append((k.replace("vina_", "").replace("_", " "), k))
+    if any(r.get("panel_best") is not None for r in rows):
+        cols += [("best dock", "panel_best"), ("best receptor", "panel_best_receptor")]
     if has_retro:
         cols += [("route", "retro_solved"), ("steps", "retro_steps")]
     # NOT "novel": the flag means the R-group is absent from the TRAINING
