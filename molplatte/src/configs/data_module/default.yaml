@@ -30,6 +30,13 @@ data_module_kwargs:
   # __getitem__ does a torch.load + hydrate + detach, and decomposition-unit
   # sampling reloads a molecule's .pt once per core, so this is I/O-heavy.
   num_workers:            32
+  # "decomposition" (legacy) splits dataloader items; a molecule averages 2.91
+  # cuts, so 91.9% of eval items came from molecules also present in training.
+  # "molecule" assigns whole molecules by a stable hash of the id -- independent
+  # of corpus size, so a merged pretraining corpus holds out exactly what the
+  # later stage holds out.
+  split_by:               decomposition
+  exclude_ids_path:       null
   val_split:              0.05
   test_split:             0.05
   seed:                   42

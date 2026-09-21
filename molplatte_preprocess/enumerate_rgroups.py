@@ -216,6 +216,14 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     parser.add_argument("--workers", type=int, default=max(1, (os.cpu_count() or 2) - 2))
     parser.add_argument("--batch-size", type=int, default=200)
     parser.add_argument("--limit-mols", type=int, default=None)
+    parser.add_argument(
+        "--ids-file",
+        default=None,
+        help="JSON list of molecule ids to scan. Use the TRAINING split: the "
+        "library's per-entry `count` feeds log p(k), which is half the scoring "
+        "function, so counting evaluation molecules puts the test set into the "
+        "prior the model is scored against.",
+    )
     parser.add_argument("--progress-every", type=int, default=25000)
     parser.add_argument(
         "--min-count",
@@ -244,6 +252,15 @@ def main(argv: Optional[List[str]] = None) -> int:
     corpus_meta = json.loads(meta_path.read_text())
     layout = corpus_meta.get("layout", "hash3")
     ids = list(corpus_meta["ids"])
+    if args.ids_file:
+        import json as _json
+        keep = set(_json.loads(Path(args.ids_file).read_text()))
+        before = len(ids)
+        ids = [i for i in ids if i in keep]
+        print(f"[info] ids-file      : {args.ids_file}")
+        print(f"[info] restricted    : {before:,} -> {len(ids):,} records")
+        if not ids:
+            raise SystemExit("ids-file matched no records in this corpus")
     if args.limit_mols is not None:
         ids = ids[: args.limit_mols]
 

@@ -48,6 +48,7 @@ the same relation: ``B1 >= B2`` and ``B1 >= B3``.
 
 from __future__ import annotations
 
+import json
 import logging
 
 from dataclasses import dataclass, field, fields
@@ -225,6 +226,15 @@ class DataModuleConfig:
     decomposition_method: str = "naveja_recap"
     batch_size: int = 512
     num_workers: int = 8
+    #: "decomposition" splits dataloader ITEMS; a molecule averages 2.91 cuts,
+    #: so 91.9% of eval items came from molecules also present in training.
+    #: "molecule" assigns each MOLECULE to one side by a stable hash of its id,
+    #: which is independent of corpus size -- so the same molecule lands in the
+    #: same split in every corpus that contains it, and a combined pretraining
+    #: corpus cannot train on a later stage's test molecules.
+    split_by: str = "decomposition"
+    #: molecule ids to drop entirely (e.g. structures reserved for a later stage)
+    exclude_ids_path: Optional[str] = None
     val_split: float = 0.05
     test_split: float = 0.05
     #: Cross-validation fold to hold out, or -1 for the ordinary random split.
@@ -308,6 +318,12 @@ class MolPLAtteDataModule(pl.LightningDataModule):
         if self.config.cv_fold >= 0:
             self._splits = self._fold_splits(dataset)
             return
+        if self.config.split_by == "molecule":
+            self._splits = self._molecule_splits(dataset)
+            return
+        if self.config.split_by != "decomposition":
+            raise ValueError(f"split_by must be 'decomposition' or 'molecule', "
+                             f"got {self.config.split_by!r}")
         n_val = int(n_total * self.config.val_split)
         n_test = int(n_total * self.config.test_split)
         n_train = n_total - n_val - n_test
@@ -316,6 +332,56 @@ class MolPLAtteDataModule(pl.LightningDataModule):
             [n_train, n_val, n_test],
             generator=torch.Generator().manual_seed(self.config.seed),
         )
+
+    def _molecule_splits(self, dataset) -> tuple:
+        """Assign whole MOLECULES to train/val/test by a stable hash of the id.
+
+        Hashing rather than shuffling indices is what makes this safe across
+        stages: the bucket depends only on (seed, molecule id), never on how
+        many other molecules happen to be in the corpus. A pretraining corpus
+        that merges ZINC with the flavour set therefore holds out exactly the
+        molecules the flavour stage holds out, instead of drawing a fresh
+        partition that would put the later stage's test set into pretraining.
+        """
+        import hashlib
+
+        ids = dataset.ids
+        mol_of_item = getattr(dataset, "_mol_of_item", None)
+        seed = self.config.seed
+
+        drop = set()
+        if self.config.exclude_ids_path:
+            drop = set(json.loads(Path(self.config.exclude_ids_path).read_text()))
+
+        def bucket(mol_id: str) -> float:
+            digest = hashlib.blake2b(f"{seed}:{mol_id}".encode(), digest_size=8).digest()
+            return int.from_bytes(digest, "big") / float(1 << 64)
+
+        frac = {m: bucket(m) for m in ids}
+        v, t = self.config.val_split, self.config.test_split
+        train, val, test = [], [], []
+        n_dropped = 0
+        for i in range(len(dataset)):
+            mol_index = int(mol_of_item[i]) if mol_of_item is not None else i
+            mol_id = ids[mol_index]
+            if mol_id in drop:
+                n_dropped += 1
+                continue
+            f = frac[mol_id]
+            if f < v:
+                val.append(i)
+            elif f < v + t:
+                test.append(i)
+            else:
+                train.append(i)
+
+        log = logging.getLogger(__name__)
+        log.info("[DataModule] split_by=molecule -> train %d / val %d / test %d items"
+                 "%s", len(train), len(val), len(test),
+                 f" ({n_dropped} dropped by exclude_ids)" if n_dropped else "")
+        if not train:
+            raise ValueError("molecule split produced an empty training set")
+        return (Subset(dataset, train), Subset(dataset, val), Subset(dataset, test))
 
     def _fold_splits(self, dataset) -> tuple:
         """Hold out one precomputed fold; everything else trains.
