@@ -168,6 +168,8 @@ def dock_panel(smiles: Sequence[str], flavours: Sequence[str], *,
         return {}
 
     out: Dict[str, Dict[str, Optional[float]]] = {}
+    ref: Dict[str, Optional[float]] = {}
+    smi = _ligand_smiles()
     for r in picks:
         if progress:
             print(f"  docking {len(smiles)} compounds into {r.key} "
@@ -179,6 +181,21 @@ def dock_panel(smiles: Sequence[str], flavours: Sequence[str], *,
         except Exception as exc:  # noqa: BLE001
             logger.warning("panel %s unavailable: %s", r.key, exc)
             continue
+        # The receptor's OWN crystal ligand, as a per-receptor reference.
+        # Vina scores are NOT comparable across pockets: a more enclosed site
+        # scores more negative regardless of fit, so the raw minimum across
+        # receptors just names the tightest pocket. Measured here: TRPM8 beat
+        # PKD2L1 on 40/40 compounds with a near-constant -0.73 kcal/mol offset.
+        # Referencing each compound to the ligand crystallised in that same
+        # pocket cancels the offset and makes "better than native" meaningful.
+        native = None
+        ref_smiles = smi.get(r.ccd)
+        if ref_smiles:
+            try:
+                native = d.dock(ref_smiles)
+            except Exception:  # noqa: BLE001
+                native = None
+        ref[r.key] = native
         sub = pose_dir / r.key if pose_dir else None
         scores = {}
         for s in smiles:
@@ -188,6 +205,7 @@ def dock_panel(smiles: Sequence[str], flavours: Sequence[str], *,
             except Exception:  # noqa: BLE001
                 scores[s] = None
         out[r.key] = scores
+    out['__native__'] = ref
     return out
 
 
@@ -204,11 +222,23 @@ def panel_columns(df, smiles_col: str, flavours: Sequence[str], **kw):
     res = dock_panel(smiles, flavours, **kw)
     if not res:
         return df
+    native = res.pop("__native__", {})
     out = df.copy()
+    dcols = []
     for key, scores in res.items():
         out[f"vina_{key}"] = out[smiles_col].map(scores)
-    cols = [f"vina_{k}" for k in res]
-    sub = out[cols]
-    out["panel_best"] = sub.min(axis=1)
-    out["panel_best_receptor"] = sub.idxmin(axis=1).str.replace("vina_", "", regex=False)
+        n = native.get(key)
+        if n is not None:
+            # negative = binds better than the ligand crystallised in that pocket
+            out[f"dvina_{key}"] = out[f"vina_{key}"] - float(n)
+            dcols.append(f"dvina_{key}")
+    if dcols:
+        sub = out[dcols]
+        out["panel_best"] = sub.min(axis=1)
+        out["panel_best_receptor"] = sub.idxmin(axis=1).str.replace("dvina_", "", regex=False)
+    else:
+        cols = [f"vina_{k}" for k in res]
+        sub = out[cols]
+        out["panel_best"] = sub.min(axis=1)
+        out["panel_best_receptor"] = sub.idxmin(axis=1).str.replace("vina_", "", regex=False)
     return out

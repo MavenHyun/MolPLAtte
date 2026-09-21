@@ -217,9 +217,11 @@ def render_html(report, out_path: str | Path, *, title: Optional[str] = None,
     # because which receptors appear depends on the flavour asked for -- the
     # panel computed these and they were silently dropped at render time.
     panel_keys = sorted({k for r in rows for k in r
-                         if isinstance(k, str) and k.startswith("vina_")})
+                         if isinstance(k, str) and (k.startswith("vina_")
+                                                    or k.startswith("dvina_"))})
     for k in panel_keys:
-        cols.append((k.replace("vina_", "").replace("_", " "), k))
+        cols.append((("Δ " if k.startswith("dvina_") else "")
+                     + k.replace("dvina_", "").replace("vina_", "").replace("_", " "), k))
     if any(r.get("panel_best") is not None for r in rows):
         cols += [("best dock", "panel_best"), ("best receptor", "panel_best_receptor")]
     if has_retro:
